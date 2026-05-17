@@ -16,7 +16,7 @@ class StepEvaluator
     private int $scale;
     private StepRecorder $recorder;
 
-    public function __construct(SymbolTable $symbolTable, int $scale = 10)
+    public function __construct(SymbolTable $symbolTable, int $scale = 5)
     {
         if (!extension_loaded('bcmath')) {
             throw new \RuntimeException('BCMath extension is required for StepEvaluator.');
@@ -158,7 +158,15 @@ class StepEvaluator
         }
 
         if ($node instanceof PowerNode) {
-            $result = bcpow($leftStr, $rightStr, $this->scale);
+            if (preg_match('/^[+-]?\d+$/', $rightStr)) {
+                $result = bcpow($leftStr, $rightStr, $this->scale);
+            } else {
+                $floatResult = pow((float)$leftStr, (float)$rightStr);
+                if (is_nan($floatResult) || is_infinite($floatResult)) {
+                    throw new \RuntimeException('Exponentiation resulted in NaN or INF.');
+                }
+                $result = number_format($floatResult, $this->scale, '.', '');
+            }
             $type = StepExplainer::powTypeDescription($leftStr, $rightStr, $result, (float)$rightStr);
             $this->recorder->record(StepExplainer::exponentiation($leftStr, $rightStr, $result, $type['en'], $type['fa']));
             return $result;
@@ -230,7 +238,15 @@ class StepEvaluator
         if ($node instanceof PowerNode) {
             $l = $this->computeConstantValue($node->getLeft());
             $r = $this->computeConstantValue($node->getRight());
-            return bcpow($l, $r, $this->scale);
+            if (preg_match('/^[+-]?\d+$/', $r)) {
+                return bcpow($l, $r, $this->scale);
+            } else {
+                $floatResult = pow((float)$l, (float)$r);
+                if (is_nan($floatResult) || is_infinite($floatResult)) {
+                    throw new \RuntimeException('Exponentiation resulted in NaN or INF.');
+                }
+                return number_format($floatResult, $this->scale, '.', '');
+            }
         }
         if ($node instanceof SqrtNode) {
             $rad = $this->computeConstantValue($node->getRadicand());

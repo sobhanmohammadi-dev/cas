@@ -17,6 +17,10 @@ abstract class NumericNode extends MathNode {
             $raw = substr($raw, 1);
             if ($raw === '') { $raw = '0'; }
         }
+        $raw = ltrim($raw, '0');
+        if ($raw === '' || $raw[0] === '.') {
+            $raw = '0' . $raw;
+        }
 
         $ePos = strpos(strtolower($raw), 'e');
         $mantissa = $ePos !== false ? substr($raw, 0, $ePos) : $raw;

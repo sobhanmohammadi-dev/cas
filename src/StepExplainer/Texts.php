@@ -256,5 +256,11 @@ final class Texts
             'formula' => "{unknown} = {result}",
             'calculation' => "{unknown} = {result}",
         ],
+        'finalSimplified' => [
+            'en'          => "The expression cannot be simplified further. Final simplified result: {result}.",
+            'fa'          => "عبارت بیش از این ساده نمی‌شود. نتیجهٔ نهایی: {result}.",
+            'formula'     => "{result}",
+            'calculation' => "{result}",
+        ],
     ];
 }

@@ -423,4 +423,9 @@ final class StepExplainer
             'result'  => $result,
         ]);
     }
+
+    public static function finalSimplified(string $result): StepText
+    {
+        return self::build('finalSimplified', ['result' => $result]);
+    }
 }
