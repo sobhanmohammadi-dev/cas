@@ -1,0 +1,20 @@
+{
+    "name": "sobhanmohammadi/cas",
+    "description": "A lightweight CAS library with step-by-step human explanations and zero external dependencies.",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Sobhanmohammadi\\Cas\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "sobhanmohammadi-dev",
+            "email": "sobhanmohammadi.dev@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.4"
+    }
+}
