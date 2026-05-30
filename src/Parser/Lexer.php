@@ -1,7 +1,7 @@
 <?php
 namespace Sobhanmohammadi\CAS\Parser;
 
-use CAS\Exception\MathParseException;
+use Sobhanmohammadi\CAS\Exception\MathParseException;
 
 class Lexer
 {

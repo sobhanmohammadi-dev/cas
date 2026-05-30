@@ -1,8 +1,8 @@
 <?php
-namespace CAS\StepExplainer;
+namespace Sobhanmohammadi\CAS\StepExplainer;
 
-use CAS\Nodes\MathNode;
-use CAS\Services\{Simplifier, SimplifierObserver, SymbolTable};
+use Sobhanmohammadi\CAS\Nodes\MathNode;
+use Sobhanmohammadi\CAS\Services\{Simplifier, SimplifierObserver, SymbolTable};
 
 /**
  * Evaluates a math node symbolically while recording each simplification
