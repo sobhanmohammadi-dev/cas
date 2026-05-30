@@ -5,6 +5,7 @@ use CAS\Nodes\MathNode;
 
 class SymbolTable
 {
+    /** @var MathNode[] */
     private array $symbols = [];
 
     public function assign(string $name, MathNode $value): void
@@ -27,6 +28,7 @@ class SymbolTable
         unset($this->symbols[$name]);
     }
 
+    /** @return MathNode[] */
     public function all(): array
     {
         return $this->symbols;

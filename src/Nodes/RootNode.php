@@ -1,27 +1,26 @@
 <?php
 namespace CAS\Nodes;
 
+/**
+ * Represents an nth-root: radical(degree, radicand).
+ *
+ * Constructor order: degree first, radicand second.
+ * This matches every call-site in the parser and evaluators.
+ */
 class RootNode extends MathNode
 {
-    private MathNode $radicand;
     private MathNode $degree;
+    private MathNode $radicand;
 
-    public function __construct(MathNode $radicand, MathNode $degree, int $s, int $e)
+    public function __construct(MathNode $degree, MathNode $radicand, int $s, int $e)
     {
         parent::__construct($s, $e);
+        $this->degree   = $degree;
         $this->radicand = $radicand;
-        $this->degree = $degree;
     }
 
-    public function getRadicand(): MathNode
-    {
-        return $this->radicand;
-    }
-
-    public function getDegree(): MathNode
-    {
-        return $this->degree;
-    }
+    public function getDegree(): MathNode   { return $this->degree; }
+    public function getRadicand(): MathNode { return $this->radicand; }
 
     public function __toString(): string
     {

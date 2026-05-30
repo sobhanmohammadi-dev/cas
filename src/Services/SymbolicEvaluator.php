@@ -6,13 +6,12 @@ use CAS\Nodes\MathNode;
 class SymbolicEvaluator
 {
     private SymbolTable $symbolTable;
-    private Simplifier $simplifier;
-
+    private Simplifier  $simplifier;
 
     public function __construct(?SymbolTable $symbolTable = null)
     {
         $this->symbolTable = $symbolTable ?? new SymbolTable();
-        $this->simplifier = new Simplifier($this->symbolTable);
+        $this->simplifier  = new Simplifier($this->symbolTable);
     }
 
     public function evaluate(MathNode $expression): MathNode
@@ -28,5 +27,10 @@ class SymbolicEvaluator
     public function getSymbolTable(): SymbolTable
     {
         return $this->symbolTable;
+    }
+
+    public function getSimplifier(): Simplifier
+    {
+        return $this->simplifier;
     }
 }

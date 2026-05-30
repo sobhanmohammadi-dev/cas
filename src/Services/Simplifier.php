@@ -12,13 +12,22 @@ use CAS\Nodes\{
 class Simplifier
 {
     private SymbolTable $symTable;
-    private int $depth;
-    private const MAX_DEPTH = 200;
+    private int $depth = 0;
+
+    /** @var SimplifierObserver|null */
+    private ?SimplifierObserver $observer = null;
+
+    private const MAX_DEPTH      = 200;
     private const MAX_ITERATIONS = 100;
 
     public function __construct(SymbolTable $symTable)
     {
         $this->symTable = $symTable;
+    }
+
+    public function setObserver(?SimplifierObserver $observer): void
+    {
+        $this->observer = $observer;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -36,7 +45,7 @@ class Simplifier
         $iteration = 0;
         do {
             $previous = $node;
-            $node = $this->simplify($node);
+            $node     = $this->simplify($node);
             if (++$iteration > self::MAX_ITERATIONS) {
                 throw new SimplifyException(
                     'Simplification did not converge after ' . self::MAX_ITERATIONS . ' iterations.'
@@ -46,6 +55,10 @@ class Simplifier
         return $node;
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    //  CORE RECURSIVE SIMPLIFIER
+    // ═══════════════════════════════════════════════════════════════════
+
     private function simplifyNode(MathNode $node): MathNode
     {
         if (++$this->depth > self::MAX_DEPTH) {
@@ -54,44 +67,48 @@ class Simplifier
 
         try {
             if ($node instanceof NumericNode) {
-                return $this->simplifyComplex($node);
+                return $this->simplifyNumeric($node);
             }
-
             if ($node instanceof PiNode) {
                 return $node;
             }
-
             if ($node instanceof VariableNode) {
                 return $this->simplifyVariable($node);
             }
-
             if ($node instanceof UnaryNode) {
                 return $this->simplifyUnary($node);
             }
-
             if ($node instanceof BinaryOperatorNode) {
                 return $this->simplifyBinaryOp($node);
             }
-
             if ($node instanceof SqrtNode) {
                 return $this->simplifySqrt($node);
             }
             if ($node instanceof RootNode) {
                 return $this->simplifyRoot($node);
             }
-
             return $node;
         } finally {
             --$this->depth;
         }
     }
 
+    // ─── Leaf simplifications ─────────────────────────────────────────
+
+    private function simplifyNumeric(NumericNode $node): MathNode
+    {
+        if (!$node instanceof ComplexNode) {
+            return $node;
+        }
+        // (a + 0i) → a,  (0 + 0i) → 0
+        if (\gmp_cmp($node->getImag(), 0) === 0) {
+            return new IntegerNode(\gmp_strval($node->getReal()), $node->getStartPos(), $node->getEndPos());
+        }
+        return $node;
+    }
+
     private function simplifyVariable(VariableNode $v): MathNode
     {
-        if ($v->isBound()) {
-            $val = $v->getAssignedValue();
-            return $this->simplifyNode($val);
-        }
         $lookup = $this->symTable->lookup($v->getName());
         if ($lookup !== null) {
             return $this->simplifyNode($lookup);
@@ -101,199 +118,209 @@ class Simplifier
 
     private function simplifyUnary(UnaryNode $u): MathNode
     {
-        $op = $u->getOp();
+        $op      = $u->getOp();
         $operand = $this->simplifyNode($u->getOperand());
 
         if ($op !== '-') {
-            if ($operand !== $u->getOperand()) {
-                return new UnaryNode($op, $operand, $u->getStartPos(), $u->getEndPos());
-            }
-            return $u;
+            return $operand !== $u->getOperand()
+                ? new UnaryNode($op, $operand, $u->getStartPos(), $u->getEndPos())
+                : $u;
         }
 
-
-        // -(-X)  →  X
+        // -(-X) → X
         if ($operand instanceof UnaryNode && $operand->getOp() === '-') {
-            return $operand->getOperand();
-        }
-
-        if ($operand instanceof IntegerNode) {
-            $val = \gmp_strval(\gmp_neg($operand->getValue()));
-            return new IntegerNode($val, $u->getStartPos(), $u->getEndPos());
-        }
-
-        if ($operand instanceof RationalNode) {
-            $num = \gmp_strval(\gmp_neg($operand->getValueOfNumerator()));
-            $den = \gmp_strval($operand->getValueOfDenominator());
-            return new RationalNode($num, $den, $u->getStartPos(), $u->getEndPos());
-        }
-
-        if ($operand instanceof ComplexNode) {
-            $r = \gmp_strval(\gmp_neg($operand->getReal()));
-            $i = \gmp_strval(\gmp_neg($operand->getImag()));
-            return new ComplexNode($r, $i, $u->getStartPos(), $u->getEndPos());
-        }
-
-        if ($operand !== $u->getOperand()) {
-            return new UnaryNode('-', $operand, $u->getStartPos(), $u->getEndPos());
-        }
-        return $u;
-    }
-
-    private function simplifyBinaryOp(BinaryOperatorNode $bin): MathNode
-    {
-        $left = $this->simplifyNode($bin->getLeft());
-        $right = $this->simplifyNode($bin->getRight());
-        $start = $bin->getStartPos();
-        $end = $bin->getEndPos();
-
-        $result = $this->applyIdentity($bin, $left, $right);
-        if ($result !== null) {
-            return $this->simplifyNode($result);
-        }
-
-        $result = $this->applyConstantFolding($bin, $left, $right);
-        if ($result !== null) {
+            $result = $operand->getOperand();
+            $this->notify('double negation', $u, $result);
             return $result;
         }
 
+        if ($operand instanceof IntegerNode) {
+            return new IntegerNode(
+                \gmp_strval(\gmp_neg($operand->getValue())),
+                $u->getStartPos(), $u->getEndPos()
+            );
+        }
+        if ($operand instanceof RationalNode) {
+            return new RationalNode(
+                \gmp_strval(\gmp_neg($operand->getValueOfNumerator())),
+                \gmp_strval($operand->getValueOfDenominator()),
+                $u->getStartPos(), $u->getEndPos()
+            );
+        }
+        if ($operand instanceof ComplexNode) {
+            return new ComplexNode(
+                \gmp_strval(\gmp_neg($operand->getReal())),
+                \gmp_strval(\gmp_neg($operand->getImag())),
+                $u->getStartPos(), $u->getEndPos()
+            );
+        }
+
+        return $operand !== $u->getOperand()
+            ? new UnaryNode('-', $operand, $u->getStartPos(), $u->getEndPos())
+            : $u;
+    }
+
+    // ─── Binary operators ─────────────────────────────────────────────
+
+    private function simplifyBinaryOp(BinaryOperatorNode $bin): MathNode
+    {
+        $left  = $this->simplifyNode($bin->getLeft());
+        $right = $this->simplifyNode($bin->getRight());
+        $start = $bin->getStartPos();
+        $end   = $bin->getEndPos();
+
+        // 1. Identity / annihilation rules
+        $result = $this->applyIdentity($bin, $left, $right, $start, $end);
+        if ($result !== null) {
+            $this->notify('identity/annihilation', $bin, $result);
+            return $this->simplifyNode($result);
+        }
+
+        // 2. Constant folding (both children are numeric)
+        if ($left instanceof NumericNode && $right instanceof NumericNode) {
+            $folded = $this->applyConstantFolding($bin, $left, $right, $start, $end);
+            if ($folded !== null) {
+                $this->notify('constant fold', $bin, $folded);
+                return $folded;
+            }
+        }
+
+        // 3. Power rules: (X^a)^b → X^(a*b)
         if ($bin instanceof PowerNode) {
-            $result = $this->applyPowerRules($bin, $left, $right);
+            $result = $this->applyPowerRules($left, $right, $start, $end);
             if ($result !== null) {
+                $this->notify('power rule', $bin, $result);
                 return $this->simplifyNode($result);
             }
         }
 
+        // 4. Like-terms combination for addition/subtraction
         if ($bin instanceof PlusNode || $bin instanceof MinusNode) {
-            $result = $this->applyLikeTerms($bin, $left, $right);
+            $result = $this->applyLikeTerms($bin, $left, $right, $start, $end);
             if ($result !== null) {
+                $this->notify('combine like terms', $bin, $result);
                 return $this->simplifyNode($result);
             }
         }
 
+        // 5. Distribution: a*(b±c) → a*b ± a*c
         if ($bin instanceof MultiplyNode) {
-            $result = $this->applyDistribution($bin, $left, $right);
+            $result = $this->applyDistribution($left, $right, $start, $end);
             if ($result !== null) {
+                $this->notify('distribution', $bin, $result);
                 return $this->simplifyNode($result);
             }
         }
+
+        // Rebuild node only if children changed
         if ($left === $bin->getLeft() && $right === $bin->getRight()) {
             return $bin;
         }
-
         return $this->makeBinaryOp(get_class($bin), $left, $right, $start, $end);
     }
 
-    private function applyIdentity(BinaryOperatorNode $bin, MathNode $l, MathNode $r): ?MathNode
-    {
+    private function applyIdentity(
+        BinaryOperatorNode $bin,
+        MathNode $l,
+        MathNode $r,
+        int $s,
+        int $e
+    ): ?MathNode {
         if ($bin instanceof PlusNode) {
-            if ($this->isNumericZero($l)) return $r;       // 0 + X → X
-            if ($this->isNumericZero($r)) return $l;       // X + 0 → X
+            if ($this->isNumericZero($l)) return $r;
+            if ($this->isNumericZero($r)) return $l;
             return null;
         }
         if ($bin instanceof MinusNode) {
-            if ($this->isNumericZero($r)) return $l;       // X - 0 → X
-            if ($this->isNumericZero($l)) {                // 0 - X → -X
-                return new UnaryNode('-', $r, $bin->getStartPos(), $bin->getEndPos());
-            }
+            if ($this->isNumericZero($r)) return $l;
+            if ($this->isNumericZero($l)) return new UnaryNode('-', $r, $s, $e);
             return null;
         }
         if ($bin instanceof MultiplyNode) {
             if ($this->isNumericZero($l) || $this->isNumericZero($r)) {
-                return new IntegerNode('0', $bin->getStartPos(), $bin->getEndPos());
+                return new IntegerNode('0', $s, $e);
             }
-            if ($this->isNumericOne($l)) return $r;       // 1 * X → X
-            if ($this->isNumericOne($r)) return $l;       // X * 1 → X
+            if ($this->isNumericOne($l)) return $r;
+            if ($this->isNumericOne($r)) return $l;
             return null;
         }
         if ($bin instanceof DivideNode) {
-            if ($this->isNumericZero($l)) {                // 0 / X → 0
-                return new IntegerNode('0', $bin->getStartPos(), $bin->getEndPos());
-            }
-            if ($this->isNumericOne($r)) return $l;       // X / 1 → X
+            if ($this->isNumericZero($l)) return new IntegerNode('0', $s, $e);
+            if ($this->isNumericOne($r))  return $l;
             return null;
         }
         if ($bin instanceof PowerNode) {
-            if ($this->isNumericZero($r)) {                // X ^ 0 → 1
-                return new IntegerNode('1', $bin->getStartPos(), $bin->getEndPos());
-            }
-            if ($this->isNumericOne($r)) return $l;       // X ^ 1 → X
-            if ($this->isNumericOne($l)) {                 // 1 ^ X → 1
-                return new IntegerNode('1', $bin->getStartPos(), $bin->getEndPos());
-            }
-            if ($this->isNumericZero($l) && !$this->isNumericZero($r)) {
-                return new IntegerNode('0', $bin->getStartPos(), $bin->getEndPos());
-            }
+            if ($this->isNumericZero($r))                             return new IntegerNode('1', $s, $e);
+            if ($this->isNumericOne($r))                              return $l;
+            if ($this->isNumericOne($l))                              return new IntegerNode('1', $s, $e);
+            if ($this->isNumericZero($l) && !$this->isNumericZero($r)) return new IntegerNode('0', $s, $e);
             return null;
         }
         return null;
     }
 
-
-    private function applyConstantFolding(BinaryOperatorNode $bin, MathNode $l, MathNode $r): ?MathNode
-    {
-        if (!$l instanceof NumericNode || !$r instanceof NumericNode) {
-            return null;
-        }
-
+    private function applyConstantFolding(
+        BinaryOperatorNode $bin,
+        NumericNode $l,
+        NumericNode $r,
+        int $s,
+        int $e
+    ): ?MathNode {
+        // Complex arithmetic is limited to +/-
         if ($l instanceof ComplexNode || $r instanceof ComplexNode) {
-            return $this->foldComplex($bin, $l, $r);
+            return $this->foldComplex($bin, $l, $r, $s, $e);
         }
 
-        [$n1, $d1] = $this->toRationalArray($l);
-        [$n2, $d2] = $this->toRationalArray($r);
-
-        $start = $bin->getStartPos();
-        $end   = $bin->getEndPos();
+        [$n1, $d1] = $this->toRationalPair($l);
+        [$n2, $d2] = $this->toRationalPair($r);
 
         if ($bin instanceof PlusNode) {
             [$rn, $rd] = $this->rationalAdd($n1, $d1, $n2, $d2);
-            return $this->makeNumeric($rn, $rd, $start, $end);
-        }
-        if ($bin instanceof MinusNode) {
+        } elseif ($bin instanceof MinusNode) {
             [$rn, $rd] = $this->rationalSub($n1, $d1, $n2, $d2);
-            return $this->makeNumeric($rn, $rd, $start, $end);
-        }
-        if ($bin instanceof MultiplyNode) {
+        } elseif ($bin instanceof MultiplyNode) {
             [$rn, $rd] = $this->rationalMul($n1, $d1, $n2, $d2);
-            return $this->makeNumeric($rn, $rd, $start, $end);
-        }
-        if ($bin instanceof DivideNode) {
+        } elseif ($bin instanceof DivideNode) {
             if (\gmp_cmp($n2, 0) === 0) {
                 throw new SimplifyException('Division by zero during constant folding.');
             }
-            // (n1/d1) / (n2/d2) = (n1*d2) / (d1*n2)
             [$rn, $rd] = $this->rationalDiv($n1, $d1, $n2, $d2);
-            return $this->makeNumeric($rn, $rd, $start, $end);
-        }
-        if ($bin instanceof PowerNode) {
+        } elseif ($bin instanceof PowerNode) {
             if (!$r instanceof IntegerNode) {
-                return null;
+                return null;    // non-integer exponent – leave symbolic
             }
-            $exp = \gmp_intval($r->getValue());
-            if ($exp < 0) {
-                // a^(-n) = 1 / a^n
-                $posExp = (int)\gmp_strval(\gmp_abs($r->getValue()));
-                $powNum = \gmp_pow($n1, $posExp);
-                $powDen = \gmp_pow($d1, $posExp);
-                return $this->makeNumeric($powDen, $powNum, $start, $end);
+            $exp = (int) \gmp_strval($r->getValue());
+            if ($exp >= 0) {
+                $rn = \gmp_pow($n1, $exp);
+                $rd = \gmp_pow($d1, $exp);
+            } else {
+                $pos = -$exp;
+                $rn  = \gmp_pow($d1, $pos);
+                $rd  = \gmp_pow($n1, $pos);
             }
-            $rn = \gmp_pow($n1, $exp);
-            $rd = \gmp_pow($d1, $exp);
-            return $this->makeNumeric($rn, $rd, $start, $end);
+        } else {
+            return null;
         }
-        return null;
+
+        return $this->makeNumeric($rn, $rd, $s, $e);
     }
 
-    private function foldComplex(BinaryOperatorNode $bin, MathNode $l, MathNode $r): ?MathNode
-    {
+    private function foldComplex(
+        BinaryOperatorNode $bin,
+        NumericNode $l,
+        NumericNode $r,
+        int $s,
+        int $e
+    ): ?MathNode {
         if (!$bin instanceof PlusNode && !$bin instanceof MinusNode) {
             return null;
         }
 
-        $lReal = ($l instanceof ComplexNode) ? $l->getReal() : (($l instanceof IntegerNode) ? $l->getValue() : null);
+        $lReal = ($l instanceof ComplexNode) ? $l->getReal()
+               : (($l instanceof IntegerNode) ? $l->getValue() : null);
         $lImag = ($l instanceof ComplexNode) ? $l->getImag() : \gmp_init(0);
-        $rReal = ($r instanceof ComplexNode) ? $r->getReal() : (($r instanceof IntegerNode) ? $r->getValue() : null);
+        $rReal = ($r instanceof ComplexNode) ? $r->getReal()
+               : (($r instanceof IntegerNode) ? $r->getValue() : null);
         $rImag = ($r instanceof ComplexNode) ? $r->getImag() : \gmp_init(0);
 
         if ($lReal === null || $rReal === null) {
@@ -308,54 +335,48 @@ class Simplifier
             $imag = \gmp_sub($lImag, $rImag);
         }
 
-        $start = $bin->getStartPos();
-        $end   = $bin->getEndPos();
-
         if (\gmp_cmp($imag, 0) === 0) {
-            return new IntegerNode(\gmp_strval($real), $start, $end);
+            return new IntegerNode(\gmp_strval($real), $s, $e);
         }
-        return new ComplexNode(\gmp_strval($real), \gmp_strval($imag), $start, $end);
+        return new ComplexNode(\gmp_strval($real), \gmp_strval($imag), $s, $e);
     }
 
-    private function applyPowerRules(PowerNode $pow, MathNode $l, MathNode $r): ?MathNode
+    private function applyPowerRules(MathNode $l, MathNode $r, int $s, int $e): ?MathNode
     {
-        // (X ^ a) ^ b  →  X ^ (a * b)
-        if ($l instanceof PowerNode) {
-            $innerBase = $l->getLeft();
-            $innerExp  = $l->getRight();
-            if ($innerExp instanceof IntegerNode && $r instanceof IntegerNode) {
-                $newExp = \gmp_mul($innerExp->getValue(), $r->getValue());
-                $start = $pow->getStartPos();
-                $end   = $pow->getEndPos();
-                return new PowerNode(
-                    $innerBase,
-                    new IntegerNode(\gmp_strval($newExp), $start, $end),
-                    $start,
-                    $end
-                );
-            }
+        // (X^a)^b → X^(a*b)  when both exponents are integers
+        if ($l instanceof PowerNode
+            && $l->getRight() instanceof IntegerNode
+            && $r instanceof IntegerNode
+        ) {
+            $newExp = \gmp_mul($l->getRight()->getValue(), $r->getValue());
+            return new PowerNode(
+                $l->getLeft(),
+                new IntegerNode(\gmp_strval($newExp), $s, $e),
+                $s, $e
+            );
         }
         return null;
     }
 
-    private function applyLikeTerms(BinaryOperatorNode $bin, MathNode $l, MathNode $r): ?MathNode
-    {
+    private function applyLikeTerms(
+        BinaryOperatorNode $bin,
+        MathNode $l,
+        MathNode $r,
+        int $s,
+        int $e
+    ): ?MathNode {
         [$c1, $t1] = $this->extractCoefficientAndTerm($l);
         [$c2, $t2] = $this->extractCoefficientAndTerm($r);
 
         if ($c1 === null || $c2 === null) {
             return null;
         }
-
         if (!$this->structuralEquals($t1, $t2)) {
             return null;
         }
 
-        $start = $bin->getStartPos();
-        $end   = $bin->getEndPos();
-
-        [$n1, $d1] = $this->toRationalArray($c1);
-        [$n2, $d2] = $this->toRationalArray($c2);
+        [$n1, $d1] = $this->toRationalPair($c1);
+        [$n2, $d2] = $this->toRationalPair($c2);
 
         if ($bin instanceof PlusNode) {
             [$cn, $cd] = $this->rationalAdd($n1, $d1, $n2, $d2);
@@ -364,100 +385,85 @@ class Simplifier
         }
 
         if (\gmp_cmp($cn, 0) === 0) {
-            return new IntegerNode('0', $start, $end);
+            return new IntegerNode('0', $s, $e);
         }
 
-        $newCoeff = $this->makeNumeric($cn, $cd, $start, $end);
+        $newCoeff = $this->makeNumeric($cn, $cd, $s, $e);
 
+        // 1*T → T
         if ($this->isNumericOne($newCoeff) && !$this->isNumericOne($t1)) {
             return $t1;
         }
-
+        // c*1 → c
         if ($this->isNumericOne($t1)) {
             return $newCoeff;
         }
 
-        return new MultiplyNode($newCoeff, $t1, $start, $end);
+        return new MultiplyNode($newCoeff, $t1, $s, $e);
     }
 
-    private function applyDistribution(BinaryOperatorNode $bin, MathNode $l, MathNode $r): ?MathNode
+    private function applyDistribution(MathNode $l, MathNode $r, int $s, int $e): ?MathNode
     {
-        $start = $bin->getStartPos();
-        $end   = $bin->getEndPos();
-
-        // a * (b + c)  →  a*b + a*c
+        // a * (b + c) → a*b + a*c
         if ($r instanceof PlusNode) {
-            $a = $l;
-            $b = $r->getLeft();
-            $c = $r->getRight();
             return new PlusNode(
-                new MultiplyNode($a, $b, $start, $end),
-                new MultiplyNode($a, $c, $start, $end),
-                $start,
-                $end
+                new MultiplyNode($l, $r->getLeft(),  $s, $e),
+                new MultiplyNode($l, $r->getRight(), $s, $e),
+                $s, $e
             );
         }
-        // a * (b - c)  →  a*b - a*c
+        // a * (b - c) → a*b - a*c
         if ($r instanceof MinusNode) {
-            $a = $l;
-            $b = $r->getLeft();
-            $c = $r->getRight();
             return new MinusNode(
-                new MultiplyNode($a, $b, $start, $end),
-                new MultiplyNode($a, $c, $start, $end),
-                $start,
-                $end
+                new MultiplyNode($l, $r->getLeft(),  $s, $e),
+                new MultiplyNode($l, $r->getRight(), $s, $e),
+                $s, $e
             );
         }
-        // (b + c) * a  →  b*a + c*a
+        // (b + c) * a → b*a + c*a
         if ($l instanceof PlusNode) {
-            $a = $r;
-            $b = $l->getLeft();
-            $c = $l->getRight();
             return new PlusNode(
-                new MultiplyNode($b, $a, $start, $end),
-                new MultiplyNode($c, $a, $start, $end),
-                $start,
-                $end
+                new MultiplyNode($l->getLeft(),  $r, $s, $e),
+                new MultiplyNode($l->getRight(), $r, $s, $e),
+                $s, $e
             );
         }
-        // (b - c) * a  →  b*a - c*a
+        // (b - c) * a → b*a - c*a
         if ($l instanceof MinusNode) {
-            $a = $r;
-            $b = $l->getLeft();
-            $c = $l->getRight();
             return new MinusNode(
-                new MultiplyNode($b, $a, $start, $end),
-                new MultiplyNode($c, $a, $start, $end),
-                $start,
-                $end
+                new MultiplyNode($l->getLeft(),  $r, $s, $e),
+                new MultiplyNode($l->getRight(), $r, $s, $e),
+                $s, $e
             );
         }
         return null;
     }
 
+    // ─── Sqrt / Root ──────────────────────────────────────────────────
+
     private function simplifySqrt(SqrtNode $s): MathNode
     {
-        $rad = $this->simplifyNode($s->getRadicand());
+        $rad   = $this->simplifyNode($s->getRadicand());
         $start = $s->getStartPos();
         $end   = $s->getEndPos();
 
-        if ($rad instanceof IntegerNode) {
-            $val = $rad->getValue();
-            if (\gmp_cmp($val, 0) >= 0 && \gmp_perfect_square($val)) {
-                $root = \gmp_sqrt($val);
-                return new IntegerNode(\gmp_strval($root), $start, $end);
-            }
+        if ($rad instanceof IntegerNode
+            && \gmp_cmp($rad->getValue(), 0) >= 0
+            && \gmp_perfect_square($rad->getValue())
+        ) {
+            $root = new IntegerNode(\gmp_strval(\gmp_sqrt($rad->getValue())), $start, $end);
+            $this->notify('sqrt perfect square', $s, $root);
+            return $root;
         }
 
-        if ($rad instanceof PowerNode) {
-            $base = $rad->getLeft();
-            $exp  = $rad->getRight();
-            if ($exp instanceof IntegerNode && \gmp_cmp($exp->getValue(), 2) === 0) {
-                if ($base instanceof IntegerNode && \gmp_cmp($base->getValue(), 0) >= 0) {
-                    return $base;
-                }
-            }
+        // sqrt(X^2) → X  when X ≥ 0
+        if ($rad instanceof PowerNode
+            && $rad->getRight() instanceof IntegerNode
+            && \gmp_cmp($rad->getRight()->getValue(), 2) === 0
+            && $rad->getLeft() instanceof IntegerNode
+            && \gmp_cmp($rad->getLeft()->getValue(), 0) >= 0
+        ) {
+            return $rad->getLeft();
         }
 
         if ($rad !== $s->getRadicand()) {
@@ -468,25 +474,25 @@ class Simplifier
 
     private function simplifyRoot(RootNode $r): MathNode
     {
-        $deg = $this->simplifyNode($r->getDegree());
-        $rad = $this->simplifyNode($r->getRadicand());
+        $deg   = $this->simplifyNode($r->getDegree());
+        $rad   = $this->simplifyNode($r->getRadicand());
         $start = $r->getStartPos();
         $end   = $r->getEndPos();
 
-        // root(X, 1)  →  X
+        // root(1, X) → X
         if ($deg instanceof IntegerNode && \gmp_cmp($deg->getValue(), 1) === 0) {
+            $this->notify('root degree 1', $r, $rad);
             return $rad;
         }
 
         if ($rad instanceof IntegerNode && $deg instanceof IntegerNode) {
-            $nth = (int)\gmp_strval($deg->getValue());
-            if ($nth > 1) {
-                $val = $rad->getValue();
-                if (\gmp_cmp($val, 0) >= 0) {
-                    $rem = \gmp_rootrem($val, $nth);
-                    if (\gmp_cmp($rem[1], 0) === 0) {
-                        return new IntegerNode(\gmp_strval($rem[0]), $start, $end);
-                    }
+            $nth = (int) \gmp_strval($deg->getValue());
+            if ($nth > 1 && \gmp_cmp($rad->getValue(), 0) >= 0) {
+                $rem = \gmp_rootrem($rad->getValue(), $nth);
+                if (\gmp_cmp($rem[1], 0) === 0) {
+                    $result = new IntegerNode(\gmp_strval($rem[0]), $start, $end);
+                    $this->notify('nth root exact', $r, $result);
+                    return $result;
                 }
             }
         }
@@ -497,169 +503,133 @@ class Simplifier
         return $r;
     }
 
-    private function simplifyComplex(MathNode $node): MathNode
-    {
-        if (!$node instanceof ComplexNode) {
-            return $node;
-        }
+    // ═══════════════════════════════════════════════════════════════════
+    //  STRUCTURAL EQUALITY
+    // ═══════════════════════════════════════════════════════════════════
 
-        $real = $node->getReal();
-        $imag = $node->getImag();
-
-        // 0 + 0i  →  0
-        if (\gmp_cmp($real, 0) === 0 && \gmp_cmp($imag, 0) === 0) {
-            return new IntegerNode('0', $node->getStartPos(), $node->getEndPos());
-        }
-
-        // a + 0i  →  a
-        if (\gmp_cmp($imag, 0) === 0) {
-            return new IntegerNode(\gmp_strval($real), $node->getStartPos(), $node->getEndPos());
-        }
-
-        return $node;
-    }
-
-
-    private function structuralEquals(MathNode $a, MathNode $b): bool
+    public function structuralEquals(MathNode $a, MathNode $b): bool
     {
         if (get_class($a) !== get_class($b)) {
             return false;
         }
-
         if ($a instanceof IntegerNode) {
             return \gmp_cmp($a->getValue(), $b->getValue()) === 0;
         }
         if ($a instanceof RationalNode) {
-            return \gmp_cmp($a->getValueOfNumerator(), $b->getValueOfNumerator()) === 0
+            /** @var RationalNode $b */
+            return \gmp_cmp($a->getValueOfNumerator(),   $b->getValueOfNumerator())   === 0
                 && \gmp_cmp($a->getValueOfDenominator(), $b->getValueOfDenominator()) === 0;
         }
         if ($a instanceof ComplexNode) {
+            /** @var ComplexNode $b */
             return \gmp_cmp($a->getReal(), $b->getReal()) === 0
                 && \gmp_cmp($a->getImag(), $b->getImag()) === 0;
         }
-        if ($a instanceof PiNode) {
-            return true;
-        }
+        if ($a instanceof PiNode)       { return true; }
         if ($a instanceof VariableNode) {
+            /** @var VariableNode $b */
             return $a->getName() === $b->getName();
         }
-
         if ($a instanceof UnaryNode) {
+            /** @var UnaryNode $b */
             return $a->getOp() === $b->getOp()
                 && $this->structuralEquals($a->getOperand(), $b->getOperand());
         }
-
+        // Commutative nodes: Plus, Multiply
         if ($a instanceof PlusNode || $a instanceof MultiplyNode) {
+            /** @var BinaryOperatorNode $a @var BinaryOperatorNode $b */
             return ($this->structuralEquals($a->getLeft(), $b->getLeft())
                     && $this->structuralEquals($a->getRight(), $b->getRight()))
                 || ($this->structuralEquals($a->getLeft(), $b->getRight())
                     && $this->structuralEquals($a->getRight(), $b->getLeft()));
         }
         if ($a instanceof BinaryOperatorNode) {
+            /** @var BinaryOperatorNode $b */
             return $this->structuralEquals($a->getLeft(), $b->getLeft())
                 && $this->structuralEquals($a->getRight(), $b->getRight());
         }
-
         if ($a instanceof SqrtNode) {
+            /** @var SqrtNode $b */
             return $this->structuralEquals($a->getRadicand(), $b->getRadicand());
         }
         if ($a instanceof RootNode) {
-            return $this->structuralEquals($a->getDegree(), $b->getDegree())
+            /** @var RootNode $b */
+            return $this->structuralEquals($a->getDegree(),   $b->getDegree())
                 && $this->structuralEquals($a->getRadicand(), $b->getRadicand());
         }
-
         return false;
     }
 
-    private function isNumericZero(MathNode $n): bool
+    // ═══════════════════════════════════════════════════════════════════
+    //  HELPERS
+    // ═══════════════════════════════════════════════════════════════════
+
+    public function isNumericZero(MathNode $n): bool
     {
-        if ($n instanceof IntegerNode) {
-            return \gmp_cmp($n->getValue(), 0) === 0;
-        }
-        if ($n instanceof RationalNode) {
-            return \gmp_cmp($n->getValueOfNumerator(), 0) === 0;
-        }
-        if ($n instanceof ComplexNode) {
+        if ($n instanceof IntegerNode)  { return \gmp_cmp($n->getValue(), 0) === 0; }
+        if ($n instanceof RationalNode) { return \gmp_cmp($n->getValueOfNumerator(), 0) === 0; }
+        if ($n instanceof ComplexNode)  {
             return \gmp_cmp($n->getReal(), 0) === 0 && \gmp_cmp($n->getImag(), 0) === 0;
         }
         return false;
     }
 
-    private function isNumericOne(MathNode $n): bool
+    public function isNumericOne(MathNode $n): bool
     {
-        if ($n instanceof IntegerNode) {
-            return \gmp_cmp($n->getValue(), 1) === 0;
-        }
+        if ($n instanceof IntegerNode)  { return \gmp_cmp($n->getValue(), 1) === 0; }
         if ($n instanceof RationalNode) {
-            return \gmp_cmp($n->getValueOfNumerator(), $n->getValueOfDenominator()) === 0
-                && \gmp_cmp($n->getValueOfNumerator(), 0) !== 0;
+            return \gmp_cmp($n->getValueOfNumerator(), 0) !== 0
+                && \gmp_cmp($n->getValueOfNumerator(), $n->getValueOfDenominator()) === 0;
         }
-        if ($n instanceof ComplexNode) {
+        if ($n instanceof ComplexNode)  {
             return \gmp_cmp($n->getReal(), 1) === 0 && \gmp_cmp($n->getImag(), 0) === 0;
         }
         return false;
     }
 
+    /**
+     * Extract (coefficient, term) from a node for like-term detection.
+     * Returns [null, $n] when the pattern is not recognised.
+     *
+     * @return array{0: NumericNode|null, 1: MathNode}
+     */
     private function extractCoefficientAndTerm(MathNode $n): array
     {
-        $start = -1;
-        $end   = -1;
-
         if ($n instanceof NumericNode) {
-            return [$n, new IntegerNode('1', $start, $end)];
+            return [$n, new IntegerNode('1', -1, -1)];
         }
-
         if ($n instanceof VariableNode || $n instanceof PiNode) {
-            return [new IntegerNode('1', $start, $end), $n];
+            return [new IntegerNode('1', -1, -1), $n];
         }
-
-        // -X  →  (-1, X)
         if ($n instanceof UnaryNode && $n->getOp() === '-') {
             $inner = $n->getOperand();
             if ($inner instanceof NumericNode) {
-                return [$n->getOperand(), new IntegerNode('1', $start, $end)];
+                return [$inner, new IntegerNode('1', -1, -1)];
             }
-            return [new IntegerNode('-1', $start, $end), $inner];
+            return [new IntegerNode('-1', -1, -1), $inner];
         }
-
-        // c * X  →  (c, X)
         if ($n instanceof MultiplyNode) {
             $l = $n->getLeft();
             $r = $n->getRight();
-            if ($l instanceof NumericNode) {
-                return [$l, $r];
-            }
-            if ($r instanceof NumericNode) {
-                return [$r, $l];
-            }
+            if ($l instanceof NumericNode) return [$l, $r];
+            if ($r instanceof NumericNode) return [$r, $l];
             return [null, $n];
         }
-
-        // X ^ k  →  (1, X^k)
-        if ($n instanceof PowerNode) {
-            return [new IntegerNode('1', $start, $end), $n];
+        if ($n instanceof PowerNode || $n instanceof SqrtNode || $n instanceof RootNode) {
+            return [new IntegerNode('1', -1, -1), $n];
         }
-
-        // Sqrt / Root
-        if ($n instanceof SqrtNode || $n instanceof RootNode) {
-            return [new IntegerNode('1', $start, $end), $n];
-        }
-
         return [null, $n];
     }
 
-    private function toRationalArray(MathNode $n): array
+    /** @return array{\GMP, \GMP} */
+    public function toRationalPair(NumericNode $n): array
     {
-        if ($n instanceof IntegerNode) {
-            return [$n->getValue(), \gmp_init(1)];
-        }
-        if ($n instanceof RationalNode) {
-            return [$n->getValueOfNumerator(), $n->getValueOfDenominator()];
-        }
+        if ($n instanceof IntegerNode)  { return [$n->getValue(), \gmp_init(1)]; }
+        if ($n instanceof RationalNode) { return [$n->getValueOfNumerator(), $n->getValueOfDenominator()]; }
         throw new SimplifyException('Cannot convert node to rational: ' . get_class($n));
     }
 
-    private function makeNumeric(\GMP $num, \GMP $den, int $start, int $end): NumericNode
+    public function makeNumeric(\GMP $num, \GMP $den, int $start, int $end): NumericNode
     {
         $gcd = \gmp_gcd($num, $den);
         $num = \gmp_div_q($num, $gcd);
@@ -676,39 +646,47 @@ class Simplifier
         return new RationalNode(\gmp_strval($num), \gmp_strval($den), $start, $end);
     }
 
-    private function makeBinaryOp(string $class, MathNode $l, MathNode $r, int $start, int $end): BinaryOperatorNode
-    {
-        return new $class($l, $r, $start, $end);
+    private function makeBinaryOp(
+        string $class,
+        MathNode $l,
+        MathNode $r,
+        int $s,
+        int $e
+    ): BinaryOperatorNode {
+        return new $class($l, $r, $s, $e);
     }
+
+    // ─── Rational arithmetic ──────────────────────────────────────────
+
     private function rationalAdd(\GMP $n1, \GMP $d1, \GMP $n2, \GMP $d2): array
     {
-        $num = \gmp_add(\gmp_mul($n1, $d2), \gmp_mul($n2, $d1));
-        $den = \gmp_mul($d1, $d2);
-        return [$num, $den];
+        return [\gmp_add(\gmp_mul($n1, $d2), \gmp_mul($n2, $d1)), \gmp_mul($d1, $d2)];
     }
 
     private function rationalSub(\GMP $n1, \GMP $d1, \GMP $n2, \GMP $d2): array
     {
-        $num = \gmp_sub(\gmp_mul($n1, $d2), \gmp_mul($n2, $d1));
-        $den = \gmp_mul($d1, $d2);
-        return [$num, $den];
+        return [\gmp_sub(\gmp_mul($n1, $d2), \gmp_mul($n2, $d1)), \gmp_mul($d1, $d2)];
     }
 
     private function rationalMul(\GMP $n1, \GMP $d1, \GMP $n2, \GMP $d2): array
     {
-        $num = \gmp_mul($n1, $n2);
-        $den = \gmp_mul($d1, $d2);
-        return [$num, $den];
+        return [\gmp_mul($n1, $n2), \gmp_mul($d1, $d2)];
     }
 
     private function rationalDiv(\GMP $n1, \GMP $d1, \GMP $n2, \GMP $d2): array
     {
-        // (n1/d1) / (n2/d2) = (n1*d2) / (d1*n2)
-        $num = \gmp_mul($n1, $d2);
-        $den = \gmp_mul($d1, $n2);
-        if (\gmp_cmp($den, 0) === 0) {
+        if (\gmp_cmp($n2, 0) === 0) {
             throw new SimplifyException('Division by zero.');
         }
-        return [$num, $den];
+        return [\gmp_mul($n1, $d2), \gmp_mul($d1, $n2)];
+    }
+
+    // ─── Observer ────────────────────────────────────────────────────
+
+    private function notify(string $rule, MathNode $before, MathNode $after): void
+    {
+        if ($this->observer !== null) {
+            $this->observer->onRuleApplied($rule, $before, $after);
+        }
     }
 }

@@ -2,18 +2,20 @@
 namespace CAS\Parser;
 
 use CAS\Exception\MathParseException;
+
 class Lexer
 {
-    private int $pos = 0;
-    private int $len;
+    private int    $pos = 0;
+    private int    $len;
     private string $src;
 
     public function __construct(string $src)
     {
-        $this->len = strlen($src);
         $this->src = $src;
+        $this->len = strlen($src);
     }
 
+    /** @return Token[] */
     public function tokenize(): array
     {
         $tokens = [];
@@ -41,27 +43,23 @@ class Lexer
                 continue;
             }
 
-            $start = $this->pos;
-            $this->pos++;
-            $end = $start;
+            $start = $this->pos++;
 
             switch ($c) {
-                case '+': $type = Token::PLUS;     $val = '+'; break;
-                case '-': $type = Token::MINUS;    $val = '-'; break;
-                case '*': $type = Token::MULTIPLY; $val = '*'; break;
-                case '/': $type = Token::DIVIDE;   $val = '/'; break;
-                case '^': $type = Token::POWER;    $val = '^'; break;
-                case '(': $type = Token::LPAREN;   $val = '('; break;
-                case ')': $type = Token::RPAREN;   $val = ')'; break;
-                case '=': $type = Token::EQUALS;   $val = '='; break;
-                case ',': $type = Token::COMMA;    $val = ','; break;
+                case '+': $tokens[] = new Token(Token::PLUS,     '+', $start, $start); break;
+                case '-': $tokens[] = new Token(Token::MINUS,    '-', $start, $start); break;
+                case '*': $tokens[] = new Token(Token::MULTIPLY, '*', $start, $start); break;
+                case '/': $tokens[] = new Token(Token::DIVIDE,   '/', $start, $start); break;
+                case '^': $tokens[] = new Token(Token::POWER,    '^', $start, $start); break;
+                case '(': $tokens[] = new Token(Token::LPAREN,   '(', $start, $start); break;
+                case ')': $tokens[] = new Token(Token::RPAREN,   ')', $start, $start); break;
+                case '=': $tokens[] = new Token(Token::EQUALS,   '=', $start, $start); break;
+                case ',': $tokens[] = new Token(Token::COMMA,    ',', $start, $start); break;
                 default:
                     throw new MathParseException(
                         "Unexpected character '{$c}' at position {$start}."
                     );
             }
-
-            $tokens[] = new Token($type, $val, $start, $end);
         }
 
         $tokens[] = new Token(Token::EOF, '', $this->pos, $this->pos);
@@ -76,14 +74,13 @@ class Lexer
 
         while ($this->pos < $this->len) {
             $c = $this->src[$this->pos];
-
             if (ctype_digit($c)) {
                 $raw .= $c;
                 $this->pos++;
             } elseif ($c === '.') {
                 if ($dots > 0) {
                     throw new MathParseException(
-                        "Malformed number literal: unexpected second '.' at position {$this->pos}."
+                        "Malformed number: unexpected second '.' at position {$this->pos}."
                     );
                 }
                 $raw .= $c;
@@ -98,11 +95,12 @@ class Lexer
             throw new MathParseException("Malformed number literal at position {$start}.");
         }
 
+        // Optional scientific-notation suffix: e / E, optional sign, digits
         if ($this->pos < $this->len
             && ($this->src[$this->pos] === 'e' || $this->src[$this->pos] === 'E')
         ) {
-            $eSave   = $this->pos;
-            $rawSave = $raw;
+            $savedPos = $this->pos;
+            $savedRaw = $raw;
 
             $raw .= $this->src[$this->pos++];
 
@@ -113,8 +111,9 @@ class Lexer
             }
 
             if ($this->pos >= $this->len || !ctype_digit($this->src[$this->pos])) {
-                $this->pos = $eSave;
-                $raw       = $rawSave;
+                // Not a valid exponent – backtrack
+                $this->pos = $savedPos;
+                $raw       = $savedRaw;
             } else {
                 while ($this->pos < $this->len && ctype_digit($this->src[$this->pos])) {
                     $raw .= $this->src[$this->pos++];
@@ -122,8 +121,7 @@ class Lexer
             }
         }
 
-        $end = $this->pos - 1;
-        return new Token(Token::NUMBER, $raw, $start, $end);
+        return new Token(Token::NUMBER, $raw, $start, $this->pos - 1);
     }
 
     private function readWord(): Token
@@ -132,35 +130,31 @@ class Lexer
         $word  = '';
 
         while ($this->pos < $this->len
-            && (ctype_alnum($this->src[$this->pos]) || $this->src[$this->pos] === '_')) {
+            && (ctype_alnum($this->src[$this->pos]) || $this->src[$this->pos] === '_')
+        ) {
             $word .= $this->src[$this->pos++];
         }
 
         $end = $this->pos - 1;
 
         switch (strtolower($word)) {
-            case 'sqrt':
-                return new Token(Token::SQRT, $word, $start, $end);
-            case 'radical':
-                return new Token(Token::RADICAL, $word, $start, $end);
-            case 'pi':
-                return new Token(Token::PI, $word, $start, $end);
-            default:
-                return new Token(Token::IDENTIFIER, $word, $start, $end);
+            case 'sqrt':    return new Token(Token::SQRT,    $word, $start, $end);
+            case 'radical': return new Token(Token::RADICAL, $word, $start, $end);
+            case 'pi':      return new Token(Token::PI,      $word, $start, $end);
+            default:        return new Token(Token::IDENTIFIER, $word, $start, $end);
         }
     }
 
     private function readBraced(): Token
     {
-        $start = $this->pos;
-        $this->pos++; // skip '{'
-        $name = '';
+        $start = $this->pos++;  // skip '{'
+        $name  = '';
 
         while ($this->pos < $this->len && $this->src[$this->pos] !== '}') {
             $c = $this->src[$this->pos];
             if (!ctype_alnum($c) && $c !== '_') {
                 throw new MathParseException(
-                    "Invalid character '{$c}' inside {} at position {$this->pos}."
+                    "Invalid character '{$c}' inside braces at position {$this->pos}."
                 );
             }
             $name .= $c;
@@ -171,13 +165,12 @@ class Lexer
             throw new MathParseException("Unclosed '{' starting at position {$start}.");
         }
 
-        $this->pos++; // skip '}'
-        $end = $this->pos - 1;
+        $this->pos++;   // skip '}'
 
         if ($name === '') {
-            throw new MathParseException("Empty variable name in {} at position {$start}.");
+            throw new MathParseException("Empty variable name in braces at position {$start}.");
         }
 
-        return new Token(Token::IDENTIFIER, $name, $start, $end);
+        return new Token(Token::IDENTIFIER, $name, $start, $this->pos - 1);
     }
 }

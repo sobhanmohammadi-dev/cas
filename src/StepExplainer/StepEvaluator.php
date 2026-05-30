@@ -4,17 +4,17 @@ namespace CAS\StepExplainer;
 use CAS\Nodes\{
     MathNode, IntegerNode, RationalNode, ComplexNode,
     PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
-    UnaryNode, SqrtNode, RootNode, PiNode, VariableNode, BinaryOperatorNode
+    UnaryNode, SqrtNode, RootNode, PiNode, VariableNode,
+    BinaryOperatorNode
 };
-use CAS\Parser\Lexer;
-use CAS\Parser\Parser;
+use CAS\Parser\{Lexer, Parser};
 use CAS\Services\SymbolTable;
 
 class StepEvaluator
 {
-    private SymbolTable $symbolTable;
-    private int $scale;
-    private StepRecorder $recorder;
+    private SymbolTable   $symbolTable;
+    private int           $scale;
+    private StepRecorder  $recorder;
 
     public function __construct(SymbolTable $symbolTable, int $scale = 5)
     {
@@ -22,13 +22,14 @@ class StepEvaluator
             throw new \RuntimeException('BCMath extension is required for StepEvaluator.');
         }
         $this->symbolTable = $symbolTable;
-        $this->scale = $scale;
-        $this->recorder = new StepRecorder();
+        $this->scale       = $scale;
+        $this->recorder    = new StepRecorder();
     }
 
+    /** @return StepText[] */
     public function evaluateExpression(string $expression): array
     {
-        $this->recorder = new StepRecorder();
+        $this->recorder->reset();
 
         $lexer  = new Lexer($expression);
         $tokens = $lexer->tokenize();
@@ -37,106 +38,112 @@ class StepEvaluator
 
         $this->recorder->record(StepExplainer::expressionStart($expression));
 
-        $result = $this->evaluateNode($ast);
+        $result = $this->evalNode($ast);
 
         $this->recorder->record(StepExplainer::finalExpressionResult($result));
 
         return $this->recorder->getSteps();
     }
 
-    private function evaluateNode(MathNode $node): string
+    // ─── Node dispatch ────────────────────────────────────────────────
+
+    private function evalNode(MathNode $node): string
     {
         if ($node instanceof IntegerNode) {
-            return gmp_strval($node->getValue());
+            return \gmp_strval($node->getValue());
         }
 
         if ($node instanceof RationalNode) {
-            $num = gmp_strval($node->getValueOfNumerator());
-            $den = gmp_strval($node->getValueOfDenominator());
-            return bcdiv($num, $den, $this->scale);
+            return bcdiv(
+                \gmp_strval($node->getValueOfNumerator()),
+                \gmp_strval($node->getValueOfDenominator()),
+                $this->scale
+            );
         }
 
         if ($node instanceof ComplexNode) {
-            throw new \RuntimeException('Complex numbers not supported in step evaluator.');
+            throw new \RuntimeException('Complex numbers are not supported in StepEvaluator.');
         }
 
         if ($node instanceof PiNode) {
-            $pi = self::piApproximation($this->scale);
+            $pi = self::piString($this->scale);
             $this->recorder->record(StepExplainer::piSubstitution($pi));
             return $pi;
         }
 
         if ($node instanceof VariableNode) {
-            $name = $node->getName();
-            $value = $this->symbolTable->lookup($name);
-            if ($value === null) {
-                throw new \RuntimeException("Undefined variable '{$name}'.");
-            }
-            $valStr = $this->evaluateNode($value);
-            $this->recorder->record(StepExplainer::variableSubstitution($name, $valStr));
-            return $valStr;
+            return $this->evalVariable($node);
         }
 
         if ($node instanceof UnaryNode) {
-            $op = $node->getOp();
-            if ($op !== '-') {
-                throw new \RuntimeException('Only unary minus is supported.');
-            }
-            $operandStr = $this->evaluateNode($node->getOperand());
-            $result = bcmul('-1', $operandStr, $this->scale);
-            $this->recorder->record(StepExplainer::unaryNegation($operandStr, $result));
-            return $result;
+            return $this->evalUnary($node);
         }
 
         if ($node instanceof BinaryOperatorNode) {
-            return $this->evaluateBinaryOp($node);
+            return $this->evalBinaryOp($node);
         }
 
         if ($node instanceof SqrtNode) {
-            $radStr = $this->evaluateNode($node->getRadicand());
-            if (bccomp($radStr, '0', $this->scale) < 0) {
-                $this->recorder->record(StepExplainer::errorImaginarySqrt($radStr));
-                throw new \RuntimeException('Square root of negative number.');
-            }
-            $result = bcsqrt($radStr, $this->scale);
-            $perfect = $this->isPerfectSquareInteger($node->getRadicand());
-            $this->recorder->record(StepExplainer::sqrtOperation($radStr, $result, $perfect, $this->scale, $result));
-            return $result;
+            return $this->evalSqrt($node);
         }
 
         if ($node instanceof RootNode) {
-            $degStr = $this->evaluateNode($node->getDegree());
-            $radStr = $this->evaluateNode($node->getRadicand());
-            $result = bcpow($radStr, bcdiv('1', $degStr, $this->scale), $this->scale);
-            $this->recorder->record(StepExplainer::radicalOperation($degStr, $radStr, $result, $this->suffixForRoot((int)$degStr)));
-            return $result;
+            return $this->evalRoot($node);
         }
 
         throw new \RuntimeException('Unsupported node type: ' . get_class($node));
     }
 
-    private function evaluateBinaryOp(BinaryOperatorNode $node): string
+    // ─── Leaves ───────────────────────────────────────────────────────
+
+    private function evalVariable(VariableNode $node): string
     {
+        $name  = $node->getName();
+        $value = $this->symbolTable->lookup($name);
+        if ($value === null) {
+            throw new \RuntimeException("Undefined variable '{$name}'.");
+        }
+        $valStr = $this->evalNode($value);
+        $this->recorder->record(StepExplainer::variableSubstitution($name, $valStr));
+        return $valStr;
+    }
+
+    private function evalUnary(UnaryNode $node): string
+    {
+        if ($node->getOp() !== '-') {
+            throw new \RuntimeException('Only unary minus is supported.');
+        }
+        $operandStr = $this->evalNode($node->getOperand());
+        $result     = bcmul('-1', $operandStr, $this->scale);
+        $this->recorder->record(StepExplainer::unaryNegation($operandStr, $result));
+        return $result;
+    }
+
+    // ─── Binary operators ─────────────────────────────────────────────
+
+    private function evalBinaryOp(BinaryOperatorNode $node): string
+    {
+        // Optimisation: collapse pure-constant subtrees in one step
         if ($this->isConstantSubtree($node)) {
-            $result = $this->computeConstantValue($node);
+            $result  = $this->computeConstant($node);
             $exprStr = $node->__toString();
             $this->recorder->record(StepExplainer::constantChain($exprStr, $result));
             return $result;
         }
 
-        $leftStr = $this->evaluateNode($node->getLeft());
-        $rightStr = $this->evaluateNode($node->getRight());
+        $leftStr  = $this->evalNode($node->getLeft());
+        $rightStr = $this->evalNode($node->getRight());
 
         if ($node instanceof PlusNode) {
-            $result = bcadd($leftStr, $rightStr, $this->scale);
-            $rIsNeg = bccomp($rightStr, '0', $this->scale) < 0;
+            $result  = bcadd($leftStr, $rightStr, $this->scale);
+            $rIsNeg  = bccomp($rightStr, '0', $this->scale) < 0;
             $this->recorder->record(StepExplainer::addition($leftStr, $rightStr, $result, $rIsNeg));
             return $result;
         }
 
         if ($node instanceof MinusNode) {
-            $result = bcsub($leftStr, $rightStr, $this->scale);
-            $rIsNeg = bccomp($rightStr, '0', $this->scale) < 0;
+            $result  = bcsub($leftStr, $rightStr, $this->scale);
+            $rIsNeg  = bccomp($rightStr, '0', $this->scale) < 0;
             $this->recorder->record(StepExplainer::subtraction($leftStr, $rightStr, $result, $rIsNeg));
             return $result;
         }
@@ -158,129 +165,191 @@ class StepEvaluator
         }
 
         if ($node instanceof PowerNode) {
-            if (preg_match('/^[+-]?\d+$/', $rightStr)) {
-                $result = bcpow($leftStr, $rightStr, $this->scale);
-            } else {
-                $floatResult = pow((float)$leftStr, (float)$rightStr);
-                if (is_nan($floatResult) || is_infinite($floatResult)) {
-                    throw new \RuntimeException('Exponentiation resulted in NaN or INF.');
-                }
-                $result = number_format($floatResult, $this->scale, '.', '');
-            }
-            $type = StepExplainer::powTypeDescription($leftStr, $rightStr, $result, (float)$rightStr);
-            $this->recorder->record(StepExplainer::exponentiation($leftStr, $rightStr, $result, $type['en'], $type['fa']));
-            return $result;
+            return $this->evalPower($leftStr, $rightStr);
         }
 
         throw new \RuntimeException('Unsupported binary operator: ' . get_class($node));
     }
 
+    private function evalPower(string $leftStr, string $rightStr): string
+    {
+        if (preg_match('/^[+-]?\d+$/', $rightStr)) {
+            $result = bcpow($leftStr, $rightStr, $this->scale);
+        } else {
+            $floatResult = pow((float) $leftStr, (float) $rightStr);
+            if (is_nan($floatResult) || is_infinite($floatResult)) {
+                throw new \RuntimeException('Exponentiation resulted in NaN or INF.');
+            }
+            $result = number_format($floatResult, $this->scale, '.', '');
+        }
+        $type = StepExplainer::powTypeDescription($leftStr, $result, (float) $rightStr);
+        $this->recorder->record(
+            StepExplainer::exponentiation($leftStr, $rightStr, $result, $type['en'], $type['fa'])
+        );
+        return $result;
+    }
+
+    // ─── Sqrt / Root ──────────────────────────────────────────────────
+
+    private function evalSqrt(SqrtNode $node): string
+    {
+        $radStr = $this->evalNode($node->getRadicand());
+        if (bccomp($radStr, '0', $this->scale) < 0) {
+            $this->recorder->record(StepExplainer::errorImaginarySqrt($radStr));
+            throw new \RuntimeException('Square root of negative number.');
+        }
+        $result  = bcsqrt($radStr, $this->scale);
+        $perfect = $this->isPerfectSquareIntegerNode($node->getRadicand());
+        $this->recorder->record(
+            StepExplainer::sqrtOperation($radStr, $result, $perfect, $this->scale)
+        );
+        return $result;
+    }
+
+    private function evalRoot(RootNode $node): string
+    {
+        $degStr = $this->evalNode($node->getDegree());
+        $radStr = $this->evalNode($node->getRadicand());
+        $result = bcpow($radStr, bcdiv('1', $degStr, $this->scale), $this->scale);
+        $suffix = $this->ordinalSuffix((int) $degStr);
+        $this->recorder->record(
+            StepExplainer::radicalOperation($degStr, $radStr, $result, $suffix)
+        );
+        return $result;
+    }
+
+    // ─── Constant-subtree helpers ─────────────────────────────────────
+
+    /**
+     * True when the subtree contains only numeric literals
+     * (no variables, π, or complex nodes).
+     */
     private function isConstantSubtree(MathNode $node): bool
     {
         if ($node instanceof IntegerNode || $node instanceof RationalNode) {
             return true;
         }
-        if ($node instanceof PiNode || $node instanceof VariableNode || $node instanceof ComplexNode) {
+        if ($node instanceof PiNode
+            || $node instanceof VariableNode
+            || $node instanceof ComplexNode
+        ) {
             return false;
         }
         if ($node instanceof UnaryNode) {
             return $this->isConstantSubtree($node->getOperand());
         }
         if ($node instanceof BinaryOperatorNode) {
-            return $this->isConstantSubtree($node->getLeft()) && $this->isConstantSubtree($node->getRight());
+            return $this->isConstantSubtree($node->getLeft())
+                && $this->isConstantSubtree($node->getRight());
         }
         if ($node instanceof SqrtNode) {
             return $this->isConstantSubtree($node->getRadicand());
         }
         if ($node instanceof RootNode) {
-            return $this->isConstantSubtree($node->getDegree()) && $this->isConstantSubtree($node->getRadicand());
+            return $this->isConstantSubtree($node->getDegree())
+                && $this->isConstantSubtree($node->getRadicand());
         }
         return false;
     }
 
-    private function computeConstantValue(MathNode $node): string
+    /** Evaluate a constant subtree using bcmath (no step recording). */
+    private function computeConstant(MathNode $node): string
     {
         if ($node instanceof IntegerNode) {
-            return gmp_strval($node->getValue());
+            return \gmp_strval($node->getValue());
         }
         if ($node instanceof RationalNode) {
-            $num = gmp_strval($node->getValueOfNumerator());
-            $den = gmp_strval($node->getValueOfDenominator());
-            return bcdiv($num, $den, $this->scale);
+            return bcdiv(
+                \gmp_strval($node->getValueOfNumerator()),
+                \gmp_strval($node->getValueOfDenominator()),
+                $this->scale
+            );
         }
         if ($node instanceof UnaryNode && $node->getOp() === '-') {
-            $inner = $this->computeConstantValue($node->getOperand());
-            return bcmul('-1', $inner, $this->scale);
+            return bcmul('-1', $this->computeConstant($node->getOperand()), $this->scale);
         }
         if ($node instanceof PlusNode) {
-            $l = $this->computeConstantValue($node->getLeft());
-            $r = $this->computeConstantValue($node->getRight());
-            return bcadd($l, $r, $this->scale);
+            return bcadd(
+                $this->computeConstant($node->getLeft()),
+                $this->computeConstant($node->getRight()),
+                $this->scale
+            );
         }
         if ($node instanceof MinusNode) {
-            $l = $this->computeConstantValue($node->getLeft());
-            $r = $this->computeConstantValue($node->getRight());
-            return bcsub($l, $r, $this->scale);
+            return bcsub(
+                $this->computeConstant($node->getLeft()),
+                $this->computeConstant($node->getRight()),
+                $this->scale
+            );
         }
         if ($node instanceof MultiplyNode) {
-            $l = $this->computeConstantValue($node->getLeft());
-            $r = $this->computeConstantValue($node->getRight());
-            return bcmul($l, $r, $this->scale);
+            return bcmul(
+                $this->computeConstant($node->getLeft()),
+                $this->computeConstant($node->getRight()),
+                $this->scale
+            );
         }
         if ($node instanceof DivideNode) {
-            $l = $this->computeConstantValue($node->getLeft());
-            $r = $this->computeConstantValue($node->getRight());
-            if (bccomp($r, '0', $this->scale) === 0) {
-                throw new \RuntimeException('Division by zero in constant.');
+            $den = $this->computeConstant($node->getRight());
+            if (bccomp($den, '0', $this->scale) === 0) {
+                throw new \RuntimeException('Division by zero in constant expression.');
             }
-            return bcdiv($l, $r, $this->scale);
+            return bcdiv($this->computeConstant($node->getLeft()), $den, $this->scale);
         }
         if ($node instanceof PowerNode) {
-            $l = $this->computeConstantValue($node->getLeft());
-            $r = $this->computeConstantValue($node->getRight());
+            $l = $this->computeConstant($node->getLeft());
+            $r = $this->computeConstant($node->getRight());
             if (preg_match('/^[+-]?\d+$/', $r)) {
                 return bcpow($l, $r, $this->scale);
-            } else {
-                $floatResult = pow((float)$l, (float)$r);
-                if (is_nan($floatResult) || is_infinite($floatResult)) {
-                    throw new \RuntimeException('Exponentiation resulted in NaN or INF.');
-                }
-                return number_format($floatResult, $this->scale, '.', '');
             }
+            $f = pow((float) $l, (float) $r);
+            if (is_nan($f) || is_infinite($f)) {
+                throw new \RuntimeException('Exponentiation resulted in NaN or INF.');
+            }
+            return number_format($f, $this->scale, '.', '');
         }
         if ($node instanceof SqrtNode) {
-            $rad = $this->computeConstantValue($node->getRadicand());
+            $rad = $this->computeConstant($node->getRadicand());
             if (bccomp($rad, '0', $this->scale) < 0) {
                 throw new \RuntimeException('Square root of negative constant.');
             }
             return bcsqrt($rad, $this->scale);
         }
         if ($node instanceof RootNode) {
-            $deg = $this->computeConstantValue($node->getDegree());
-            $rad = $this->computeConstantValue($node->getRadicand());
+            $deg = $this->computeConstant($node->getDegree());
+            $rad = $this->computeConstant($node->getRadicand());
             return bcpow($rad, bcdiv('1', $deg, $this->scale), $this->scale);
         }
         throw new \RuntimeException('Unsupported constant node: ' . get_class($node));
     }
 
-    private function isPerfectSquareInteger(MathNode $node): bool
+    private function isPerfectSquareIntegerNode(MathNode $node): bool
     {
-        if ($node instanceof IntegerNode) {
-            $val = $node->getValue();
-            return gmp_perfect_square($val);
+        return $node instanceof IntegerNode && \gmp_perfect_square($node->getValue());
+    }
+
+    // ─── Static helpers ───────────────────────────────────────────────
+
+    /**
+     * Returns π to $scale decimal places from a hard-coded 100-digit string.
+     * The string has 99 decimal digits, so $scale is clamped accordingly.
+     */
+    private static function piString(int $scale): string
+    {
+        // 100 significant digits of π (1 integer + 99 decimal digits)
+        $pi = '3.14159265358979323846264338327950288419716939937510'
+            . '58209749445923078164062862089986280348253421170679';
+
+        if ($scale <= 0) {
+            return '3';
         }
-        return false;
+        // "3." + $scale digits, but cap at what we have stored
+        $maxScale = strlen($pi) - 2;        // subtract "3."
+        $digits   = min($scale, $maxScale);
+        return substr($pi, 0, $digits + 2); // +2 for "3."
     }
 
-    private static function piApproximation(int $scale): string
-    {
-        $pi = '3.1415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170679';
-        if ($scale <= 0) return '3';
-        $length = $scale + 2;
-        return substr($pi, 0, min(strlen($pi), $length));
-    }
-
-    private function suffixForRoot(int $degree): string
+    private function ordinalSuffix(int $degree): string
     {
         if ($degree === 1) return '1st';
         if ($degree === 2) return '2nd';

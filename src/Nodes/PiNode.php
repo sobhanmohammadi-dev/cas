@@ -1,17 +1,14 @@
 <?php
 namespace CAS\Nodes;
 
-class PiNode extends MathNode {
-
-    public function __construct(int $s, int $e) {
+class PiNode extends MathNode
+{
+    public function __construct(int $s, int $e)
+    {
         parent::__construct($s, $e);
     }
 
-    public function getConstantName(): string {
-        return 'pi';
-    }
+    public function getConstantName(): string { return 'pi'; }
 
-    public function __toString(): string {
-        return 'π';
-    }
+    public function __toString(): string { return 'π'; }
 }
