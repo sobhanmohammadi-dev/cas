@@ -1,14 +1,14 @@
 <?php
-namespace CAS\StepExplainer;
+namespace Sobhanmohammadi\CAS\StepExplainer;
 
-use CAS\Nodes\{
+use Sobhanmohammadi\CAS\Nodes\{
     MathNode, IntegerNode, RationalNode, ComplexNode,
     PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode, PiNode, VariableNode,
     BinaryOperatorNode
 };
-use CAS\Parser\{Lexer, Parser};
-use CAS\Services\SymbolTable;
+use Sobhanmohammadi\CAS\Parser\{Lexer, Parser};
+use Sobhanmohammadi\CAS\Services\SymbolTable;
 
 class StepEvaluator
 {

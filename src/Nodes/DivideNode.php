@@ -1,5 +1,5 @@
 <?php
-namespace CAS\Nodes;
+namespace Sobhanmohammadi\CAS\Nodes;
 
 class DivideNode extends BinaryOperatorNode
 {

@@ -1,5 +1,5 @@
 <?php
-namespace CAS\StepExplainer;
+namespace Sobhanmohammadi\CAS\StepExplainer;
 
 class StepRecorder
 {

@@ -1,7 +1,7 @@
 <?php
-namespace CAS\Services;
+namespace Sobhanmohammadi\CAS\Services;
 
-use CAS\Nodes\{
+use Sobhanmohammadi\CAS\Nodes\{
     MathNode, IntegerNode, RationalNode,
     PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode,

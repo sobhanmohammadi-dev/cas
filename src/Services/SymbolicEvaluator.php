@@ -1,7 +1,7 @@
 <?php
-namespace CAS\Services;
+namespace Sobhanmohammadi\CAS\Services;
 
-use CAS\Nodes\MathNode;
+use Sobhanmohammadi\CAS\Nodes\MathNode;
 
 class SymbolicEvaluator
 {

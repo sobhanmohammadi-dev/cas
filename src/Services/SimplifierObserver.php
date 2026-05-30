@@ -1,7 +1,7 @@
 <?php
-namespace CAS\Services;
+namespace Sobhanmohammadi\CAS\Services;
 
-use CAS\Nodes\MathNode;
+use Sobhanmohammadi\CAS\Nodes\MathNode;
 
 /**
  * Implement this interface and attach it to a Simplifier to receive

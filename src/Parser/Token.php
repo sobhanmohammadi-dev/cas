@@ -1,5 +1,5 @@
 <?php
-namespace CAS\Parser;
+namespace Sobhanmohammadi\CAS\Parser;
 
 class Token
 {

@@ -1,15 +1,15 @@
 <?php
-namespace CAS\StepExplainer;
+namespace Sobhanmohammadi\CAS\StepExplainer;
 
-use CAS\Nodes\{
+use Sobhanmohammadi\CAS\Nodes\{
     MathNode, IntegerNode,
     MinusNode, DivideNode, UnaryNode,
     VariableNode, SqrtNode, RootNode,
     PlusNode, MultiplyNode, PowerNode,
     EquationNode
 };
-use CAS\Parser\{Lexer, Parser};
-use CAS\Services\{LinearSolverTrait, Simplifier, SymbolTable};
+use Sobhanmohammadi\CAS\Parser\{Lexer, Parser};
+use Sobhanmohammadi\CAS\Services\{LinearSolverTrait, Simplifier, SymbolTable};
 
 /**
  * Solves a linear equation one step at a time, recording each transformation

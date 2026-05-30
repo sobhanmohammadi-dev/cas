@@ -1,8 +1,8 @@
 <?php
-namespace CAS\Services;
+namespace Sobhanmohammadi\CAS\Services;
 
-use CAS\Exception\SimplifyException;
-use CAS\Nodes\{
+use Sobhanmohammadi\CAS\Exception\SimplifyException;
+use Sobhanmohammadi\CAS\Nodes\{
     MathNode, NumericNode, IntegerNode, RationalNode, ComplexNode,
     BinaryOperatorNode, PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode,

@@ -1,5 +1,5 @@
 <?php
-namespace CAS\Nodes;
+namespace Sobhanmohammadi\CAS\Nodes;
 
 class AssignmentNode extends MathNode {
     private string $variableName;

@@ -1,8 +1,8 @@
 <?php
-namespace CAS\Services;
+namespace Sobhanmohammadi\CAS\Services;
 
-use CAS\Nodes\{MathNode, EquationNode};
-use CAS\Parser\{Lexer, Parser};
+use Sobhanmohammadi\CAS\Nodes\{MathNode, EquationNode};
+use Sobhanmohammadi\CAS\Parser\{Lexer, Parser};
 
 /**
  * Solves a linear equation and returns the result as a fully-evaluated

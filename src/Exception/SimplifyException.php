@@ -1,4 +1,4 @@
 <?php
-namespace CAS\Exception;
+namespace Sobhanmohammadi\CAS\Exception;
 
 class SimplifyException extends \RuntimeException {}

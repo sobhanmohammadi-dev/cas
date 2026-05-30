@@ -1,12 +1,12 @@
 <?php
-namespace CAS\Services;
+namespace Sobhanmohammadi\CAS\Services;
 
-use CAS\Nodes\{
+use Sobhanmohammadi\CAS\Nodes\{
     MathNode, IntegerNode,
     MinusNode, DivideNode, UnaryNode,
     EquationNode
 };
-use CAS\Parser\{Lexer, Parser};
+use Sobhanmohammadi\CAS\Parser\{Lexer, Parser};
 
 class SymbolicSolver
 {

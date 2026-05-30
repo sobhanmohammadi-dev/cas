@@ -1,16 +1,16 @@
 <?php
-namespace CAS\StepExplainer;
+namespace Sobhanmohammadi\CAS\StepExplainer;
 
-use CAS\Nodes\{
+use Sobhanmohammadi\CAS\Nodes\{
     MathNode, IntegerNode, RationalNode,
     PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode,
     VariableNode, PiNode, EquationNode
 };
-use CAS\Parser\Lexer;
-use CAS\Parser\Parser;
-use CAS\Services\Simplifier;
-use CAS\Services\SymbolTable;
+use Sobhanmohammadi\CAS\Parser\Lexer;
+use Sobhanmohammadi\CAS\Parser\Parser;
+use Sobhanmohammadi\CAS\Services\Simplifier;
+use Sobhanmohammadi\CAS\Services\SymbolTable;
 
 class SymbolicStepSolver
 {
