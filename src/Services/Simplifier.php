@@ -253,7 +253,7 @@ class Simplifier
             if ($this->isNumericZero($r))                             return new IntegerNode('1', $s, $e);
             if ($this->isNumericOne($r))                              return $l;
             if ($this->isNumericOne($l))                              return new IntegerNode('1', $s, $e);
-            if ($this->isNumericZero($l) && !$this->isNumericZero($r)) return new IntegerNode('0', $s, $e);
+            if ($this->isNumericZero($l) && $this->isNumericPositive($r)) return new IntegerNode('0', $s, $e);
             return null;
         }
         return null;
@@ -584,6 +584,21 @@ class Simplifier
         if ($n instanceof ComplexNode)  {
             return \gmp_cmp($n->getReal(), 1) === 0 && \gmp_cmp($n->getImag(), 0) === 0;
         }
+        return false;
+    }
+
+    /**
+     * True when $n is a real numeric node (integer or rational) with a
+     * strictly positive value. Used to guard the 0^r → 0 identity rule,
+     * which is only valid for r > 0 (0^0 is handled separately as 1, and
+     * 0^(negative) is undefined and must be left to raise a division-by-
+     * zero error during constant folding rather than being silently
+     * folded to 0).
+     */
+    private function isNumericPositive(MathNode $n): bool
+    {
+        if ($n instanceof IntegerNode)  { return \gmp_sign($n->getValue()) > 0; }
+        if ($n instanceof RationalNode) { return \gmp_sign($n->getValueOfNumerator()) > 0; }
         return false;
     }
 

@@ -210,12 +210,68 @@ class StepEvaluator
     {
         $degStr = $this->evalNode($node->getDegree());
         $radStr = $this->evalNode($node->getRadicand());
-        $result = bcpow($radStr, bcdiv('1', $degStr, $this->scale), $this->scale);
+        if (bccomp($degStr, '0', $this->scale) === 0) {
+            throw new \RuntimeException('Root degree cannot be zero.');
+        }
+        $result = $this->bcNthRoot($radStr, $degStr, $this->scale);
         $suffix = $this->ordinalSuffix((int) $degStr);
         $this->recorder->record(
             StepExplainer::radicalOperation($degStr, $radStr, $result, $suffix)
         );
         return $result;
+    }
+
+    /**
+     * Computes the real nth root of $rad to $scale decimal digits using
+     * Newton's method with bcmath, since bcpow() does not support a
+     * fractional exponent (bcpow($rad, 1/$deg, ...) either truncates the
+     * exponent to an integer or, on modern bcmath, raises a ValueError).
+     *
+     * Iteration: x_{k+1} = ((n-1)*x_k + rad / x_k^(n-1)) / n
+     */
+    private function bcNthRoot(string $rad, string $deg, int $scale): string
+    {
+        $n = (int) $deg;
+        if ($n === 1) {
+            return bcadd($rad, '0', $scale);
+        }
+
+        $negative = bccomp($rad, '0', $scale) < 0;
+        if ($negative) {
+            if ($n % 2 === 0) {
+                throw new \RuntimeException('Even root of a negative number is not real.');
+            }
+            $rad = bcmul($rad, '-1', $scale);
+        }
+        if (bccomp($rad, '0', $scale) === 0) {
+            return bcadd('0', '0', $scale);
+        }
+
+        $working  = $scale + 10;
+        $guess    = pow((float) $rad, 1.0 / $n);
+        $x        = number_format((!is_finite($guess) || $guess <= 0) ? 1.0 : $guess, $working, '.', '');
+        $nMinus1  = (string) ($n - 1);
+
+        for ($i = 0; $i < 100; $i++) {
+            $xPow = bcpow($x, $nMinus1, $working);
+            if (bccomp($xPow, '0', $working) === 0) {
+                $x = bcadd($x, '0.0000000001', $working);
+                continue;
+            }
+            $next = bcdiv(
+                bcadd(bcmul($nMinus1, $x, $working), bcdiv($rad, $xPow, $working), $working),
+                (string) $n,
+                $working
+            );
+            $converged = bccomp($next, $x, $scale + 2) === 0;
+            $x = $next;
+            if ($converged) {
+                break;
+            }
+        }
+
+        $result = bcadd($x, '0', $scale);
+        return $negative ? bcmul($result, '-1', $scale) : $result;
     }
 
     // ─── Constant-subtree helpers ─────────────────────────────────────
@@ -318,7 +374,10 @@ class StepEvaluator
         if ($node instanceof RootNode) {
             $deg = $this->computeConstant($node->getDegree());
             $rad = $this->computeConstant($node->getRadicand());
-            return bcpow($rad, bcdiv('1', $deg, $this->scale), $this->scale);
+            if (bccomp($deg, '0', $this->scale) === 0) {
+                throw new \RuntimeException('Root degree cannot be zero.');
+            }
+            return $this->bcNthRoot($rad, $deg, $this->scale);
         }
         throw new \RuntimeException('Unsupported constant node: ' . get_class($node));
     }

@@ -5,7 +5,7 @@ use Sobhanmohammadi\CAS\Nodes\{
     MathNode, IntegerNode, RationalNode,
     PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode,
-    VariableNode, PiNode
+    VariableNode, PiNode, BinaryOperatorNode
 };
 
 /**
@@ -166,7 +166,7 @@ trait LinearSolverTrait
         if ($node instanceof VariableNode) {
             return $node->getName() === $varName;
         }
-        if ($node instanceof \CAS\Nodes\BinaryOperatorNode) {
+        if ($node instanceof BinaryOperatorNode) {
             return $this->containsVariable($node->getLeft(),  $varName)
                 || $this->containsVariable($node->getRight(), $varName);
         }

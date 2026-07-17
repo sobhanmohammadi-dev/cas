@@ -20,8 +20,8 @@ class ComplexNode extends NumericNode
             throw new InvalidArgumentException('Invalid imaginary part: ' . $imagStr);
         }
 
-        $this->real = \gmp_init($realStr);
-        $this->imag = \gmp_init($imagStr);
+        $this->real = \gmp_init($realStr, 10);
+        $this->imag = \gmp_init($imagStr, 10);
     }
 
     public function getReal(): GMP { return $this->real; }
