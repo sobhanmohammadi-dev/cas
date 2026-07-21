@@ -19,8 +19,8 @@ class RationalNode extends NumericNode
             throw new InvalidArgumentException('Invalid denominator: ' . $denominator);
         }
 
-        $num = \gmp_init($numerator, 10);
-        $den = \gmp_init($denominator, 10);
+        $num = \gmp_init($numerator);
+        $den = \gmp_init($denominator);
 
         if (\gmp_cmp($den, 0) === 0) {
             throw new InvalidArgumentException('Denominator cannot be zero.');

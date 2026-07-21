@@ -29,6 +29,18 @@ final class Texts
             'formula'     => "-({origFmt})",
             'calculation' => "-({origFmt}) = {resFmt}",
         ],
+        'trigOperation' => [
+            'en'          => "Computing {fnName}({argFmt}) (argument in radians). Result, rounded to {precision} decimal places: {vFmt}.",
+            'fa'          => "محاسبه {fnName}({argFmt}) (بر حسب رادیان). نتیجه (تا {precision} رقم اعشار): {vFmt}.",
+            'formula'     => "{fnName}({argFmt})",
+            'calculation' => "{fnName}({argFmt}) = {vFmt}",
+        ],
+        'atan2Operation' => [
+            'en'          => "Computing atan2({yFmt}, {xFmt}) (two-argument inverse tangent, resolves the correct quadrant). Result, rounded to {precision} decimal places: {vFmt}.",
+            'fa'          => "محاسبه atan2({yFmt}, {xFmt}) (آرک‌تانژانت دوآرگومانی، ربع صحیح را تعیین می‌کند). نتیجه (تا {precision} رقم اعشار): {vFmt}.",
+            'formula'     => "atan2({yFmt}, {xFmt})",
+            'calculation' => "atan2({yFmt}, {xFmt}) = {vFmt}",
+        ],
         'sqrt_perfect' => [
             'en'          => "Computing √{aFmt}: {aFmt} is a perfect square ({vFmt} × {vFmt} = {aFmt}), so the root is the whole number {vFmt}.",
             'fa'          => "محاسبه √{aFmt}: {aFmt} یک مربع کامل است ({vFmt} × {vFmt} = {aFmt}). نتیجه: {vFmt}.",

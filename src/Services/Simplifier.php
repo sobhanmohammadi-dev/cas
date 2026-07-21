@@ -6,7 +6,8 @@ use Sobhanmohammadi\CAS\Nodes\{
     MathNode, NumericNode, IntegerNode, RationalNode, ComplexNode,
     BinaryOperatorNode, PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode,
-    PiNode, VariableNode
+    PiNode, VariableNode,
+    TrigFunctionNode, SinNode, CosNode, TanNode, AsinNode, AtanNode, Atan2Node
 };
 
 class Simplifier
@@ -86,6 +87,12 @@ class Simplifier
             }
             if ($node instanceof RootNode) {
                 return $this->simplifyRoot($node);
+            }
+            if ($node instanceof Atan2Node) {
+                return $this->simplifyAtan2($node);
+            }
+            if ($node instanceof TrigFunctionNode) {
+                return $this->simplifyTrigFunction($node);
             }
             return $node;
         } finally {
@@ -253,7 +260,7 @@ class Simplifier
             if ($this->isNumericZero($r))                             return new IntegerNode('1', $s, $e);
             if ($this->isNumericOne($r))                              return $l;
             if ($this->isNumericOne($l))                              return new IntegerNode('1', $s, $e);
-            if ($this->isNumericZero($l) && $this->isNumericPositive($r)) return new IntegerNode('0', $s, $e);
+            if ($this->isNumericZero($l) && !$this->isNumericZero($r)) return new IntegerNode('0', $s, $e);
             return null;
         }
         return null;
@@ -503,6 +510,88 @@ class Simplifier
         return $r;
     }
 
+    // ─── Trig / inverse-trig ────────────────────────────────────────────
+
+    /**
+     * Recurses into the argument and folds the small set of exact
+     * identities that hold for every real argument (sin/tan/asin/atan of
+     * exact 0, cos of exact 0). Anything else is transcendental and is
+     * left symbolic here — approximate numeric evaluation happens in the
+     * decimal StepEvaluator layer, never in this exact/GMP layer.
+     */
+    private function simplifyTrigFunction(TrigFunctionNode $node): MathNode
+    {
+        $arg   = $this->simplifyNode($node->getArgument());
+        $start = $node->getStartPos();
+        $end   = $node->getEndPos();
+        $isZero = $arg instanceof IntegerNode && \gmp_cmp($arg->getValue(), 0) === 0;
+
+        if ($isZero) {
+            if ($node instanceof CosNode) {
+                $result = new IntegerNode('1', $start, $end);
+            } else {
+                // sin(0) = 0, tan(0) = 0, asin(0) = 0, atan(0) = 0
+                $result = new IntegerNode('0', $start, $end);
+            }
+            $this->notify($node->getFunctionName() . '(0) identity', $node, $result);
+            return $result;
+        }
+
+        if ($node instanceof AsinNode && $arg instanceof IntegerNode
+            && \gmp_cmp($arg->getValue(), 1) === 0
+        ) {
+            // asin(1) has no exact rational/π-free closed form we represent
+            // here; leave symbolic rather than guessing.
+        }
+
+        if ($arg === $node->getArgument()) {
+            return $node;
+        }
+
+        return $this->rebuildTrig($node, $arg, $start, $end);
+    }
+
+    private function simplifyAtan2(Atan2Node $node): MathNode
+    {
+        $y     = $this->simplifyNode($node->getY());
+        $x     = $this->simplifyNode($node->getX());
+        $start = $node->getStartPos();
+        $end   = $node->getEndPos();
+
+        $yIsZero = $y instanceof IntegerNode && \gmp_cmp($y->getValue(), 0) === 0;
+        $xIsZero = $x instanceof IntegerNode && \gmp_cmp($x->getValue(), 0) === 0;
+
+        if ($yIsZero && $xIsZero) {
+            throw new \Sobhanmohammadi\CAS\Exception\DomainException(
+                'atan2(0, 0) is undefined.'
+            );
+        }
+
+        // atan2(0, positive x) = 0
+        if ($yIsZero && $x instanceof IntegerNode && \gmp_cmp($x->getValue(), 0) > 0) {
+            $result = new IntegerNode('0', $start, $end);
+            $this->notify('atan2(0, +x) identity', $node, $result);
+            return $result;
+        }
+
+        if ($y === $node->getY() && $x === $node->getX()) {
+            return $node;
+        }
+        return new Atan2Node($y, $x, $start, $end);
+    }
+
+    private function rebuildTrig(TrigFunctionNode $node, MathNode $arg, int $start, int $end): MathNode
+    {
+        if ($node instanceof SinNode)  { return new SinNode($arg, $start, $end); }
+        if ($node instanceof CosNode)  { return new CosNode($arg, $start, $end); }
+        if ($node instanceof TanNode)  { return new TanNode($arg, $start, $end); }
+        if ($node instanceof AsinNode) { return new AsinNode($arg, $start, $end); }
+        if ($node instanceof AtanNode) { return new AtanNode($arg, $start, $end); }
+        throw new \Sobhanmohammadi\CAS\Exception\UnsupportedOperationException(
+            'Unknown trig node type: ' . get_class($node)
+        );
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  STRUCTURAL EQUALITY
     // ═══════════════════════════════════════════════════════════════════
@@ -557,6 +646,15 @@ class Simplifier
             return $this->structuralEquals($a->getDegree(),   $b->getDegree())
                 && $this->structuralEquals($a->getRadicand(), $b->getRadicand());
         }
+        if ($a instanceof TrigFunctionNode) {
+            /** @var TrigFunctionNode $b */
+            return $this->structuralEquals($a->getArgument(), $b->getArgument());
+        }
+        if ($a instanceof Atan2Node) {
+            /** @var Atan2Node $b */
+            return $this->structuralEquals($a->getY(), $b->getY())
+                && $this->structuralEquals($a->getX(), $b->getX());
+        }
         return false;
     }
 
@@ -584,21 +682,6 @@ class Simplifier
         if ($n instanceof ComplexNode)  {
             return \gmp_cmp($n->getReal(), 1) === 0 && \gmp_cmp($n->getImag(), 0) === 0;
         }
-        return false;
-    }
-
-    /**
-     * True when $n is a real numeric node (integer or rational) with a
-     * strictly positive value. Used to guard the 0^r → 0 identity rule,
-     * which is only valid for r > 0 (0^0 is handled separately as 1, and
-     * 0^(negative) is undefined and must be left to raise a division-by-
-     * zero error during constant folding rather than being silently
-     * folded to 0).
-     */
-    private function isNumericPositive(MathNode $n): bool
-    {
-        if ($n instanceof IntegerNode)  { return \gmp_sign($n->getValue()) > 0; }
-        if ($n instanceof RationalNode) { return \gmp_sign($n->getValueOfNumerator()) > 0; }
         return false;
     }
 

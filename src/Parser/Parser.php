@@ -15,7 +15,13 @@ use Sobhanmohammadi\CAS\Nodes\{
     SqrtNode,
     RootNode,
     PiNode,
-    VariableNode
+    VariableNode,
+    SinNode,
+    CosNode,
+    TanNode,
+    AsinNode,
+    AtanNode,
+    Atan2Node
 };
 
 class Parser
@@ -192,6 +198,34 @@ class Parser
                 return new RootNode($deg, $rad, $s, $rp->getEnd());
             }
 
+            if ($type === Token::SIN || $type === Token::COS || $type === Token::TAN
+                || $type === Token::ASIN || $type === Token::ATAN
+            ) {
+                $s = $t->getStart();
+                $this->eat();
+                $this->expect(Token::LPAREN);
+                $arg = $this->expr();
+                $rp  = $this->expect(Token::RPAREN);
+                switch ($type) {
+                    case Token::SIN:  return new SinNode($arg, $s, $rp->getEnd());
+                    case Token::COS:  return new CosNode($arg, $s, $rp->getEnd());
+                    case Token::TAN:  return new TanNode($arg, $s, $rp->getEnd());
+                    case Token::ASIN: return new AsinNode($arg, $s, $rp->getEnd());
+                    default:          return new AtanNode($arg, $s, $rp->getEnd());
+                }
+            }
+
+            if ($type === Token::ATAN2) {
+                $s = $t->getStart();
+                $this->eat();
+                $this->expect(Token::LPAREN);
+                $y = $this->expr();
+                $this->expect(Token::COMMA);
+                $x = $this->expr();
+                $rp = $this->expect(Token::RPAREN);
+                return new Atan2Node($y, $x, $s, $rp->getEnd());
+            }
+
             if ($type === Token::LPAREN) {
                 $s = $t->getStart();
                 $this->eat();
@@ -252,6 +286,12 @@ class Parser
             Token::LPAREN,
             Token::SQRT,
             Token::RADICAL,
+            Token::SIN,
+            Token::COS,
+            Token::TAN,
+            Token::ASIN,
+            Token::ATAN,
+            Token::ATAN2,
         ], true);
     }
 

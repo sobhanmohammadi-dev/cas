@@ -5,7 +5,11 @@ use Sobhanmohammadi\CAS\Nodes\{
     MathNode, NumericNode, IntegerNode, RationalNode, ComplexNode,
     BinaryOperatorNode, PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode,
-    PiNode, VariableNode
+    PiNode, VariableNode,
+    TrigFunctionNode, Atan2Node
+};
+use Sobhanmohammadi\CAS\Exception\{
+    DivisionByZeroException, DomainException, UnboundVariableException, UnsupportedOperationException
 };
 
 class NumericEvaluator
@@ -40,7 +44,7 @@ class NumericEvaluator
             }
 
             if ($node instanceof PiNode) {
-                throw new \RuntimeException('Cannot numerically evaluate symbolic constant π.');
+                throw new UnsupportedOperationException('Cannot numerically evaluate symbolic constant π.');
             }
 
             if ($node instanceof VariableNode) {
@@ -57,7 +61,17 @@ class NumericEvaluator
             if ($node instanceof SqrtNode)     { return $this->evalSqrt($node); }
             if ($node instanceof RootNode)     { return $this->evalRoot($node); }
 
-            throw new \RuntimeException('Unsupported node type: ' . get_class($node));
+            if ($node instanceof TrigFunctionNode || $node instanceof Atan2Node) {
+                // Trigonometric functions are transcendental: they have no
+                // exact GMP-rational representation in general, so this
+                // exact evaluation layer never computes them. Use
+                // StepEvaluator (decimal/bcmath) for numeric trig results.
+                throw new UnsupportedOperationException(
+                    'Trigonometric functions cannot be evaluated exactly; use the decimal StepEvaluator instead.'
+                );
+            }
+
+            throw new UnsupportedOperationException('Unsupported node type: ' . get_class($node));
         } finally {
             --$this->depth;
         }
@@ -68,7 +82,7 @@ class NumericEvaluator
         $name  = $var->getName();
         $value = $this->symTable->lookup($name);
         if ($value === null) {
-            throw new \RuntimeException("Variable '{$name}' is not assigned a value.");
+            throw new UnboundVariableException("Variable '{$name}' is not assigned a value.");
         }
         return $this->evalNode($value);
     }
@@ -157,7 +171,7 @@ class NumericEvaluator
         }
         $val = $rad->getValue();
         if (\gmp_cmp($val, 0) < 0) {
-            throw new \RuntimeException('Cannot evaluate square root of a negative number.');
+            throw new DomainException('Cannot evaluate square root of a negative number.');
         }
         if (!\gmp_perfect_square($val)) {
             throw new \RuntimeException('Cannot evaluate square root of a non-perfect-square exactly.');
@@ -181,7 +195,7 @@ class NumericEvaluator
 
         $val = $rad->getValue();
         if (\gmp_cmp($val, 0) < 0 && ($n % 2 === 0)) {
-            throw new \RuntimeException('Even root of a negative number is not real.');
+            throw new DomainException('Even root of a negative number is not real.');
         }
 
         $rem = \gmp_rootrem($val, $n);
@@ -240,7 +254,7 @@ class NumericEvaluator
         [$n1, $d1] = $this->toRational($a);
         [$n2, $d2] = $this->toRational($b);
         if (\gmp_cmp($n2, 0) === 0) {
-            throw new \RuntimeException('Division by zero.');
+            throw new DivisionByZeroException('Division by zero.');
         }
         return $this->makeReduced(\gmp_mul($n1, $d2), \gmp_mul($d1, $n2), $s, $e);
     }

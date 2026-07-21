@@ -1,4 +1,5 @@
 <?php
 namespace Sobhanmohammadi\CAS\Exception;
 
-class MathParseException extends \RuntimeException {}
+/** Lexer/parser syntax errors. */
+class MathParseException extends CasException {}

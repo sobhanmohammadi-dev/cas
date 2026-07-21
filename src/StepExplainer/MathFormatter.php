@@ -6,10 +6,12 @@ use Sobhanmohammadi\CAS\Nodes\{
     MathNode, IntegerNode, RationalNode,
     PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode, PiNode, VariableNode,
-    BinaryOperatorNode
+    BinaryOperatorNode,
+    TrigFunctionNode, SinNode, CosNode, TanNode, AsinNode, AtanNode, Atan2Node
 };
 use Sobhanmohammadi\CAS\Parser\{Lexer, Parser};
 use Sobhanmohammadi\CAS\Services\SymbolTable;
+use Sobhanmohammadi\CAS\Exception\DomainException;
 
 /**
  * MathFormatter
@@ -260,12 +262,72 @@ class MathFormatter
         if ($node instanceof PowerNode)    { return $this->walkPower($node); }
         if ($node instanceof SqrtNode)     { return $this->walkSqrt($node); }
         if ($node instanceof RootNode)     { return $this->walkRoot($node); }
+        if ($node instanceof Atan2Node)    { return $this->walkAtan2($node); }
+        if ($node instanceof TrigFunctionNode) { return $this->walkTrig($node); }
         if ($node instanceof MultiplyNode) { return $this->walkBinary($node, 'Multiplication', '×'); }
         if ($node instanceof DivideNode)   { return $this->walkBinary($node, 'Division',       '÷'); }
         if ($node instanceof PlusNode)     { return $this->walkBinary($node, 'Addition',       '+'); }
         if ($node instanceof MinusNode)    { return $this->walkBinary($node, 'Subtraction',    '-'); }
 
         throw new \RuntimeException('Unsupported node: ' . get_class($node));
+    }
+
+    private function walkTrig(TrigFunctionNode $node): string
+    {
+        $argVal = $this->walk($node->getArgument());
+        $before = $this->renderState();
+        $arg    = $this->fmt($argVal);
+        $fnName = $node->getFunctionName();
+
+        $argFloat = (float) $argVal;
+        if ($node instanceof AsinNode && ($argFloat < -1.0 || $argFloat > 1.0)) {
+            throw new DomainException("asin({$arg}) is undefined: argument must be in [-1, 1].");
+        }
+
+        $value = match (true) {
+            $node instanceof SinNode  => sin($argFloat),
+            $node instanceof CosNode  => cos($argFloat),
+            $node instanceof TanNode  => tan($argFloat),
+            $node instanceof AsinNode => asin($argFloat),
+            $node instanceof AtanNode => atan($argFloat),
+            default => throw new \RuntimeException('Unknown trig node: ' . get_class($node)),
+        };
+        if (is_nan($value) || is_infinite($value)) {
+            throw new DomainException("{$fnName}({$arg}) is undefined or unbounded.");
+        }
+
+        $result = $this->floatToBc($value);
+        $res    = $this->fmt($result);
+        $target = $fnName . '(' . $arg . ')';
+        $calc   = $target . ' = ' . $res;
+
+        $this->store($node, $result);
+        $after = $this->renderState();
+        $this->addStep('Trigonometric Function', 'Trig', $target, $before, $after, $calc);
+        return $result;
+    }
+
+    private function walkAtan2(Atan2Node $node): string
+    {
+        $yVal   = $this->walk($node->getY());
+        $xVal   = $this->walk($node->getX());
+        $before = $this->renderState();
+        $y      = $this->fmt($yVal);
+        $x      = $this->fmt($xVal);
+
+        if ((float) $yVal === 0.0 && (float) $xVal === 0.0) {
+            throw new DomainException('atan2(0, 0) is undefined.');
+        }
+
+        $result = $this->floatToBc(atan2((float) $yVal, (float) $xVal));
+        $res    = $this->fmt($result);
+        $target = 'atan2(' . $y . ', ' . $x . ')';
+        $calc   = $target . ' = ' . $res;
+
+        $this->store($node, $result);
+        $after = $this->renderState();
+        $this->addStep('Two-Argument Arctangent', 'Atan2', $target, $before, $after, $calc);
+        return $result;
     }
 
     private function walkPower(PowerNode $node): string
@@ -327,10 +389,7 @@ class MathFormatter
         $deg    = $this->fmt($degVal);
         $rad    = $this->fmt($radVal);
 
-        if (bccomp($degVal, '0', $this->scale) === 0) {
-            throw new \RuntimeException('Root degree cannot be zero.');
-        }
-        $result = $this->bcNthRoot($radVal, $degVal, $this->scale);
+        $result = bcpow($radVal, bcdiv('1', $degVal, $this->scale), $this->scale);
         $res    = $this->fmt($result);
 
         $target = $this->rootPrefix($deg) . '√' . $rad;
@@ -340,64 +399,6 @@ class MathFormatter
         $after = $this->renderState();
         $this->addStep('Nth Root', 'Nth Root', $target, $before, $after, $calc);
         return $result;
-    }
-
-    /**
-     * Computes the real nth root of $rad to $scale decimal digits using
-     * Newton's method with bcmath, since bcpow() does not support a
-     * fractional exponent (bcpow($rad, 1/$deg, ...) either truncates the
-     * exponent to an integer or, on modern bcmath, raises a ValueError).
-     *
-     * Iteration: x_{k+1} = ((n-1)*x_k + rad / x_k^(n-1)) / n
-     *
-     * @param string $rad   Radicand, as a decimal string.
-     * @param string $deg   Root degree, as a decimal string (must be an
-     *                      integer value; e.g. "3" for a cube root).
-     * @param int    $scale Number of decimal digits in the result.
-     */
-    private function bcNthRoot(string $rad, string $deg, int $scale): string
-    {
-        $n = (int) $deg;
-        if ($n === 1) {
-            return bcadd($rad, '0', $scale);
-        }
-
-        $negative = bccomp($rad, '0', $scale) < 0;
-        if ($negative) {
-            if ($n % 2 === 0) {
-                throw new \RuntimeException('Even root of a negative number is not real.');
-            }
-            $rad = bcmul($rad, '-1', $scale);
-        }
-        if (bccomp($rad, '0', $scale) === 0) {
-            return bcadd('0', '0', $scale);
-        }
-
-        $working  = $scale + 10;
-        $guess    = pow((float) $rad, 1.0 / $n);
-        $x        = number_format((!is_finite($guess) || $guess <= 0) ? 1.0 : $guess, $working, '.', '');
-        $nMinus1  = (string) ($n - 1);
-
-        for ($i = 0; $i < 100; $i++) {
-            $xPow = bcpow($x, $nMinus1, $working);
-            if (bccomp($xPow, '0', $working) === 0) {
-                $x = bcadd($x, '0.0000000001', $working);
-                continue;
-            }
-            $next = bcdiv(
-                bcadd(bcmul($nMinus1, $x, $working), bcdiv($rad, $xPow, $working), $working),
-                (string) $n,
-                $working
-            );
-            $converged = bccomp($next, $x, $scale + 2) === 0;
-            $x = $next;
-            if ($converged) {
-                break;
-            }
-        }
-
-        $result = bcadd($x, '0', $scale);
-        return $negative ? bcmul($result, '-1', $scale) : $result;
     }
 
     private function walkBinary(BinaryOperatorNode $node, string $opKey, string $sym): string
@@ -505,6 +506,15 @@ class MathFormatter
             $rad = $this->renderNode($node->getRadicand(), 5);
             return $this->rootPrefix($this->fmt($deg)) . '√' . $rad;
         }
+        if ($node instanceof Atan2Node) {
+            $y = $this->renderNode($node->getY(), 0);
+            $x = $this->renderNode($node->getX(), 0);
+            return 'atan2(' . $y . ', ' . $x . ')';
+        }
+        if ($node instanceof TrigFunctionNode) {
+            $arg = $this->renderNode($node->getArgument(), 0);
+            return $node->getFunctionName() . '(' . $arg . ')';
+        }
         if ($node instanceof MultiplyNode) {
             $l = $this->renderNode($node->getLeft(),  2);
             $r = $this->renderNode($node->getRight(), 3);
@@ -563,6 +573,15 @@ class MathFormatter
             $deg = $this->prettyRender($node->getDegree(), 5);
             $rad = $this->prettyRender($node->getRadicand(), 5);
             return $this->rootPrefix($deg) . '√' . $rad;
+        }
+        if ($node instanceof Atan2Node) {
+            $y = $this->prettyRender($node->getY(), 0);
+            $x = $this->prettyRender($node->getX(), 0);
+            return 'atan2(' . $y . ', ' . $x . ')';
+        }
+        if ($node instanceof TrigFunctionNode) {
+            $arg = $this->prettyRender($node->getArgument(), 0);
+            return $node->getFunctionName() . '(' . $arg . ')';
         }
         if ($node instanceof MultiplyNode) {
             $l = $this->prettyRender($node->getLeft(), 2);

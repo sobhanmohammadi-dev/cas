@@ -1,4 +1,5 @@
 <?php
 namespace Sobhanmohammadi\CAS\Exception;
 
-class SimplifyException extends \RuntimeException {}
+/** Simplification failures (e.g. exact division by zero during constant folding). */
+class SimplifyException extends CasException {}

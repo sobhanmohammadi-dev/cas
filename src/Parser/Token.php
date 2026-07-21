@@ -17,6 +17,12 @@ class Token
     public const SQRT       = 'SQRT';
     public const RADICAL    = 'RADICAL';
     public const PI         = 'PI';
+    public const SIN        = 'SIN';
+    public const COS        = 'COS';
+    public const TAN        = 'TAN';
+    public const ASIN       = 'ASIN';
+    public const ATAN       = 'ATAN';
+    public const ATAN2      = 'ATAN2';
     public const EOF        = 'EOF';
 
     private string $type;

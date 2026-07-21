@@ -13,7 +13,7 @@ class IntegerNode extends NumericNode
         if (!preg_match('/^[+-]?\d+$/', $numericStr)) {
             throw new InvalidArgumentException('Invalid integer string: ' . $numericStr);
         }
-        $this->value = \gmp_init($numericStr, 10);
+        $this->value = \gmp_init($numericStr);
     }
 
     public function getValue(): \GMP         { return $this->value; }

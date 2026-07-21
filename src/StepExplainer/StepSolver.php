@@ -212,6 +212,22 @@ class StepSolver
                 $expr->getEndPos()
             );
         }
+        if ($expr instanceof \Sobhanmohammadi\CAS\Nodes\Atan2Node) {
+            return new \Sobhanmohammadi\CAS\Nodes\Atan2Node(
+                $this->substitute($expr->getY(), $varName, $value),
+                $this->substitute($expr->getX(), $varName, $value),
+                $expr->getStartPos(),
+                $expr->getEndPos()
+            );
+        }
+        if ($expr instanceof \Sobhanmohammadi\CAS\Nodes\TrigFunctionNode) {
+            $class = get_class($expr);
+            return new $class(
+                $this->substitute($expr->getArgument(), $varName, $value),
+                $expr->getStartPos(),
+                $expr->getEndPos()
+            );
+        }
         return $expr;
     }
 

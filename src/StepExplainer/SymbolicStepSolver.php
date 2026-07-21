@@ -5,7 +5,8 @@ use Sobhanmohammadi\CAS\Nodes\{
     MathNode, IntegerNode, RationalNode,
     PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode,
-    VariableNode, PiNode, EquationNode
+    VariableNode, PiNode, EquationNode,
+    TrigFunctionNode, Atan2Node
 };
 use Sobhanmohammadi\CAS\Parser\Lexer;
 use Sobhanmohammadi\CAS\Parser\Parser;
@@ -149,6 +150,16 @@ class SymbolicStepSolver
             $rad = $this->substitute($expr->getRadicand(), $varName, $value);
             return new RootNode($deg, $rad, $expr->getStartPos(), $expr->getEndPos());
         }
+        if ($expr instanceof Atan2Node) {
+            $y = $this->substitute($expr->getY(), $varName, $value);
+            $x = $this->substitute($expr->getX(), $varName, $value);
+            return new Atan2Node($y, $x, $expr->getStartPos(), $expr->getEndPos());
+        }
+        if ($expr instanceof TrigFunctionNode) {
+            $class = get_class($expr);
+            $arg = $this->substitute($expr->getArgument(), $varName, $value);
+            return new $class($arg, $expr->getStartPos(), $expr->getEndPos());
+        }
         return $expr;
     }
 
@@ -231,6 +242,12 @@ class SymbolicStepSolver
             }
             return [new IntegerNode('0', 0, 0), $expr];
         }
+        if ($expr instanceof TrigFunctionNode || $expr instanceof Atan2Node) {
+            if ($this->containsVariable($expr, $unknown)) {
+                throw new \RuntimeException('Nonlinear equation: variable inside trigonometric function.');
+            }
+            return [new IntegerNode('0', 0, 0), $expr];
+        }
         if ($expr instanceof VariableNode) {
             return [new IntegerNode('0', 0, 0), $expr];
         }
@@ -277,6 +294,13 @@ class SymbolicStepSolver
         if ($node instanceof RootNode) {
             return $this->containsVariable($node->getDegree(), $varName) ||
                    $this->containsVariable($node->getRadicand(), $varName);
+        }
+        if ($node instanceof TrigFunctionNode) {
+            return $this->containsVariable($node->getArgument(), $varName);
+        }
+        if ($node instanceof Atan2Node) {
+            return $this->containsVariable($node->getY(), $varName) ||
+                   $this->containsVariable($node->getX(), $varName);
         }
         return false;
     }

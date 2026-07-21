@@ -141,6 +141,12 @@ class Lexer
             case 'sqrt':    return new Token(Token::SQRT,    $word, $start, $end);
             case 'radical': return new Token(Token::RADICAL, $word, $start, $end);
             case 'pi':      return new Token(Token::PI,      $word, $start, $end);
+            case 'sin':     return new Token(Token::SIN,     $word, $start, $end);
+            case 'cos':     return new Token(Token::COS,     $word, $start, $end);
+            case 'tan':     return new Token(Token::TAN,     $word, $start, $end);
+            case 'asin':    return new Token(Token::ASIN,    $word, $start, $end);
+            case 'atan2':   return new Token(Token::ATAN2,   $word, $start, $end);
+            case 'atan':    return new Token(Token::ATAN,    $word, $start, $end);
             default:        return new Token(Token::IDENTIFIER, $word, $start, $end);
         }
     }

@@ -234,6 +234,34 @@ final class StepExplainer
         ]);
     }
 
+    public static function trigOperation(
+        string $fnName,
+        string $argFmt,
+        string $vFmt,
+        int    $precision
+    ): StepText {
+        return self::build('trigOperation', [
+            'fnName'    => $fnName,
+            'argFmt'    => $argFmt,
+            'vFmt'      => $vFmt,
+            'precision' => (string) $precision,
+        ]);
+    }
+
+    public static function atan2Operation(
+        string $yFmt,
+        string $xFmt,
+        string $vFmt,
+        int    $precision
+    ): StepText {
+        return self::build('atan2Operation', [
+            'yFmt'      => $yFmt,
+            'xFmt'      => $xFmt,
+            'vFmt'      => $vFmt,
+            'precision' => (string) $precision,
+        ]);
+    }
+
     public static function symbolicOperation(
         string $opName,
         string $opNameFa,

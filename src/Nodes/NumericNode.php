@@ -37,12 +37,12 @@ abstract class NumericNode extends MathNode
 
         $dotPos = strpos($mantissa, '.');
         if ($dotPos === false) {
-            $num = \gmp_init($mantissa, 10);
+            $num = \gmp_init($mantissa);
             $den = \gmp_init(1);
         } else {
             $intPart  = substr($mantissa, 0, $dotPos) ?: '0';
             $fracPart = substr($mantissa, $dotPos + 1);
-            $num      = \gmp_init($intPart . $fracPart, 10);
+            $num      = \gmp_init($intPart . $fracPart);
             $den      = \gmp_init('1' . str_repeat('0', strlen($fracPart)));
         }
 

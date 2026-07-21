@@ -5,7 +5,8 @@ use Sobhanmohammadi\CAS\Nodes\{
     MathNode, IntegerNode, RationalNode,
     PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode,
-    VariableNode, PiNode, BinaryOperatorNode
+    VariableNode, PiNode, BinaryOperatorNode,
+    TrigFunctionNode, Atan2Node
 };
 
 /**
@@ -128,6 +129,23 @@ trait LinearSolverTrait
             return [new IntegerNode('0', 0, 0), $expr];
         }
 
+        // Trig / inverse-trig functions of the unknown are transcendental,
+        // never linear — treat like sqrt/root above.
+        if ($expr instanceof TrigFunctionNode) {
+            if ($this->containsVariable($expr->getArgument(), $unknown)) {
+                throw new \RuntimeException('Nonlinear equation: variable inside trigonometric function.');
+            }
+            return [new IntegerNode('0', 0, 0), $expr];
+        }
+        if ($expr instanceof Atan2Node) {
+            if ($this->containsVariable($expr->getY(), $unknown)
+                || $this->containsVariable($expr->getX(), $unknown)
+            ) {
+                throw new \RuntimeException('Nonlinear equation: variable inside trigonometric function.');
+            }
+            return [new IntegerNode('0', 0, 0), $expr];
+        }
+
         throw new \RuntimeException('Unsupported node type in linear equation: ' . get_class($expr));
     }
 
@@ -179,6 +197,13 @@ trait LinearSolverTrait
         if ($node instanceof RootNode) {
             return $this->containsVariable($node->getDegree(),   $varName)
                 || $this->containsVariable($node->getRadicand(), $varName);
+        }
+        if ($node instanceof TrigFunctionNode) {
+            return $this->containsVariable($node->getArgument(), $varName);
+        }
+        if ($node instanceof Atan2Node) {
+            return $this->containsVariable($node->getY(), $varName)
+                || $this->containsVariable($node->getX(), $varName);
         }
         return false;
     }

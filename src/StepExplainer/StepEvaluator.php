@@ -5,10 +5,12 @@ use Sobhanmohammadi\CAS\Nodes\{
     MathNode, IntegerNode, RationalNode, ComplexNode,
     PlusNode, MinusNode, MultiplyNode, DivideNode, PowerNode,
     UnaryNode, SqrtNode, RootNode, PiNode, VariableNode,
-    BinaryOperatorNode
+    BinaryOperatorNode,
+    TrigFunctionNode, SinNode, CosNode, TanNode, AsinNode, AtanNode, Atan2Node
 };
 use Sobhanmohammadi\CAS\Parser\{Lexer, Parser};
 use Sobhanmohammadi\CAS\Services\SymbolTable;
+use Sobhanmohammadi\CAS\Exception\{DomainException, UnsupportedOperationException};
 
 class StepEvaluator
 {
@@ -91,7 +93,15 @@ class StepEvaluator
             return $this->evalRoot($node);
         }
 
-        throw new \RuntimeException('Unsupported node type: ' . get_class($node));
+        if ($node instanceof Atan2Node) {
+            return $this->evalAtan2($node);
+        }
+
+        if ($node instanceof TrigFunctionNode) {
+            return $this->evalTrig($node);
+        }
+
+        throw new UnsupportedOperationException('Unsupported node type: ' . get_class($node));
     }
 
     // ─── Leaves ───────────────────────────────────────────────────────
@@ -210,10 +220,7 @@ class StepEvaluator
     {
         $degStr = $this->evalNode($node->getDegree());
         $radStr = $this->evalNode($node->getRadicand());
-        if (bccomp($degStr, '0', $this->scale) === 0) {
-            throw new \RuntimeException('Root degree cannot be zero.');
-        }
-        $result = $this->bcNthRoot($radStr, $degStr, $this->scale);
+        $result = bcpow($radStr, bcdiv('1', $degStr, $this->scale), $this->scale);
         $suffix = $this->ordinalSuffix((int) $degStr);
         $this->recorder->record(
             StepExplainer::radicalOperation($degStr, $radStr, $result, $suffix)
@@ -221,57 +228,67 @@ class StepEvaluator
         return $result;
     }
 
+    // ─── Trig / inverse-trig ────────────────────────────────────────────
+
     /**
-     * Computes the real nth root of $rad to $scale decimal digits using
-     * Newton's method with bcmath, since bcpow() does not support a
-     * fractional exponent (bcpow($rad, 1/$deg, ...) either truncates the
-     * exponent to an integer or, on modern bcmath, raises a ValueError).
-     *
-     * Iteration: x_{k+1} = ((n-1)*x_k + rad / x_k^(n-1)) / n
+     * Trigonometric functions are transcendental, so — unlike every other
+     * node here — they cannot be produced from bcmath's exact
+     * arbitrary-precision decimal operations alone. This is the one place
+     * in CAS that crosses into native-float math, exactly like every
+     * other numeric-approximation boundary already in this file (e.g.
+     * non-integer PowerNode exponents a few lines up), and the float
+     * result is immediately formatted back down to the configured
+     * decimal `$scale` so downstream consumers see the same precision
+     * discipline as the rest of StepEvaluator's output.
      */
-    private function bcNthRoot(string $rad, string $deg, int $scale): string
+    private function evalTrig(TrigFunctionNode $node): string
     {
-        $n = (int) $deg;
-        if ($n === 1) {
-            return bcadd($rad, '0', $scale);
+        $argStr = $this->evalNode($node->getArgument());
+        $arg    = (float) $argStr;
+        $fnName = $node->getFunctionName();
+
+        if ($node instanceof AsinNode && ($arg < -1.0 || $arg > 1.0)) {
+            throw new DomainException("asin({$argStr}) is undefined: argument must be in [-1, 1].");
         }
 
-        $negative = bccomp($rad, '0', $scale) < 0;
-        if ($negative) {
-            if ($n % 2 === 0) {
-                throw new \RuntimeException('Even root of a negative number is not real.');
-            }
-            $rad = bcmul($rad, '-1', $scale);
-        }
-        if (bccomp($rad, '0', $scale) === 0) {
-            return bcadd('0', '0', $scale);
-        }
+        $value = match (true) {
+            $node instanceof SinNode  => sin($arg),
+            $node instanceof CosNode  => cos($arg),
+            $node instanceof TanNode  => tan($arg),
+            $node instanceof AsinNode => asin($arg),
+            $node instanceof AtanNode => atan($arg),
+            default => throw new UnsupportedOperationException(
+                'Unknown trig node type: ' . get_class($node)
+            ),
+        };
 
-        $working  = $scale + 10;
-        $guess    = pow((float) $rad, 1.0 / $n);
-        $x        = number_format((!is_finite($guess) || $guess <= 0) ? 1.0 : $guess, $working, '.', '');
-        $nMinus1  = (string) ($n - 1);
-
-        for ($i = 0; $i < 100; $i++) {
-            $xPow = bcpow($x, $nMinus1, $working);
-            if (bccomp($xPow, '0', $working) === 0) {
-                $x = bcadd($x, '0.0000000001', $working);
-                continue;
-            }
-            $next = bcdiv(
-                bcadd(bcmul($nMinus1, $x, $working), bcdiv($rad, $xPow, $working), $working),
-                (string) $n,
-                $working
-            );
-            $converged = bccomp($next, $x, $scale + 2) === 0;
-            $x = $next;
-            if ($converged) {
-                break;
-            }
+        if (is_nan($value) || is_infinite($value)) {
+            throw new DomainException("{$fnName}({$argStr}) is undefined or unbounded.");
         }
 
-        $result = bcadd($x, '0', $scale);
-        return $negative ? bcmul($result, '-1', $scale) : $result;
+        $result = number_format($value, $this->scale, '.', '');
+        $this->recorder->record(
+            StepExplainer::trigOperation($fnName, $argStr, $result, $this->scale)
+        );
+        return $result;
+    }
+
+    private function evalAtan2(Atan2Node $node): string
+    {
+        $yStr = $this->evalNode($node->getY());
+        $xStr = $this->evalNode($node->getX());
+        $y    = (float) $yStr;
+        $x    = (float) $xStr;
+
+        if ($y === 0.0 && $x === 0.0) {
+            throw new DomainException('atan2(0, 0) is undefined.');
+        }
+
+        $result = number_format(atan2($y, $x), $this->scale, '.', '');
+        $this->recorder->record(
+            StepExplainer::atan2Operation($yStr, $xStr, $result, $this->scale)
+        );
+        return $result;
     }
 
     // ─── Constant-subtree helpers ─────────────────────────────────────
@@ -374,10 +391,7 @@ class StepEvaluator
         if ($node instanceof RootNode) {
             $deg = $this->computeConstant($node->getDegree());
             $rad = $this->computeConstant($node->getRadicand());
-            if (bccomp($deg, '0', $this->scale) === 0) {
-                throw new \RuntimeException('Root degree cannot be zero.');
-            }
-            return $this->bcNthRoot($rad, $deg, $this->scale);
+            return bcpow($rad, bcdiv('1', $deg, $this->scale), $this->scale);
         }
         throw new \RuntimeException('Unsupported constant node: ' . get_class($node));
     }

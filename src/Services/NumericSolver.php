@@ -41,4 +41,27 @@ class NumericSolver
         // Evaluate the symbolic result to a pure number
         return $this->evaluator->evaluate($solution);
     }
+
+    /**
+     * Solves ax^2 + bx + c = 0, returning both roots as fully-evaluated
+     * numeric data. Real roots are reduced to an IntegerNode/RationalNode
+     * via NumericEvaluator; the (real, imaginary) parts of a non-real
+     * pair are each reduced the same way, since exact evaluation is only
+     * defined for perfect-square discriminants — for an irrational
+     * discriminant, catch the resulting UnsupportedOperationException and
+     * use SymbolicSolver::solveQuadratic() to get the symbolic sqrt(...)
+     * form instead.
+     *
+     * @return array<int, array{real: MathNode, imaginary: ?MathNode}>
+     */
+    public function solveQuadratic(string $equation, string $unknown): array
+    {
+        $roots = $this->symbolic->solveQuadratic($equation, $unknown);
+        return array_map(function (QuadraticRoot $root): array {
+            return [
+                'real'      => $this->evaluator->evaluate($root->getReal()),
+                'imaginary' => $root->isReal() ? null : $this->evaluator->evaluate($root->getImaginary()),
+            ];
+        }, $roots);
+    }
 }
