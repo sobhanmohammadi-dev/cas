@@ -25,8 +25,13 @@ abstract class NumericNode extends MathNode
             }
         }
 
-        $raw = ltrim($raw, '0');
-        if ($raw === '' || $raw[0] === '.') {
+        $raw = trim($raw);
+
+        if ($raw === '' || $raw === '.') {
+            $raw = '0';
+        }
+
+        if ($raw[0] === '.') {
             $raw = '0' . $raw;
         }
 
@@ -37,17 +42,25 @@ abstract class NumericNode extends MathNode
 
         $dotPos = strpos($mantissa, '.');
         if ($dotPos === false) {
-            $num = \gmp_init($mantissa === '' ? '0' : $mantissa, 10);
-            $den = \gmp_init(1, 10);
+            $num = \gmp_init($mantissa);
+            $den = \gmp_init(1);
         } else {
             $intPart  = substr($mantissa, 0, $dotPos) ?: '0';
             $fracPart = substr($mantissa, $dotPos + 1);
-            $numDigits = $intPart . $fracPart;
-            $num      = \gmp_init($numDigits === '' ? '0' : $numDigits, 10);
-            $den      = \gmp_init('1' . str_repeat('0', strlen($fracPart)), 10);
+
+            // Remove leading zeros because GMP does not accept strings like 070710...
+            $numString = ltrim($intPart . $fracPart, '0');
+
+            // Keep zero valid
+            if ($numString === '') {
+                $numString = '0';
+            }
+
+            $num = \gmp_init($numString, 10);
+            $den = \gmp_init('1' . str_repeat('0', strlen($fracPart)), 10);
         }
 
-        $ten = \gmp_init(10, 10);
+        $ten = \gmp_init(10);
         if ($exponent > 0) {
             $num = \gmp_mul($num, \gmp_pow($ten, $exponent));
         } elseif ($exponent < 0) {
