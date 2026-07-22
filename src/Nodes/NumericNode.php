@@ -37,16 +37,17 @@ abstract class NumericNode extends MathNode
 
         $dotPos = strpos($mantissa, '.');
         if ($dotPos === false) {
-            $num = \gmp_init($mantissa);
-            $den = \gmp_init(1);
+            $num = \gmp_init($mantissa === '' ? '0' : $mantissa, 10);
+            $den = \gmp_init(1, 10);
         } else {
             $intPart  = substr($mantissa, 0, $dotPos) ?: '0';
             $fracPart = substr($mantissa, $dotPos + 1);
-            $num      = \gmp_init($intPart . $fracPart);
-            $den      = \gmp_init('1' . str_repeat('0', strlen($fracPart)));
+            $numDigits = $intPart . $fracPart;
+            $num      = \gmp_init($numDigits === '' ? '0' : $numDigits, 10);
+            $den      = \gmp_init('1' . str_repeat('0', strlen($fracPart)), 10);
         }
 
-        $ten = \gmp_init(10);
+        $ten = \gmp_init(10, 10);
         if ($exponent > 0) {
             $num = \gmp_mul($num, \gmp_pow($ten, $exponent));
         } elseif ($exponent < 0) {
