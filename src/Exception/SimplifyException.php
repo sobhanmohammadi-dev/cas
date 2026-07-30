@@ -1,5 +1,9 @@
 <?php
+
+declare(strict_types=1);
+
 namespace Sobhanmohammadi\CAS\Exception;
 
-/** Simplification failures (e.g. exact division by zero during constant folding). */
-class SimplifyException extends CasException {}
+final class SimplifyException extends CasException
+{
+}

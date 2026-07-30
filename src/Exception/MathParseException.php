@@ -1,5 +1,9 @@
 <?php
+
+declare(strict_types=1);
+
 namespace Sobhanmohammadi\CAS\Exception;
 
-/** Lexer/parser syntax errors. */
-class MathParseException extends CasException {}
+final class MathParseException extends CasException
+{
+}
